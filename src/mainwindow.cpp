@@ -508,17 +508,19 @@ void MainWindow::setupToolbar(QSettings& store)
     }
 
 #ifndef Q_OS_WIN
-    m_limitToSameFilesystemAction = new QAction(
-        toolbarIcon({"freeze-row-column"},
-            QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")),
-        tr("Single Filesystem"),
-        this);
-    m_limitToSameFilesystemAction->setCheckable(true);
-    m_limitToSameFilesystemAction->setChecked(m_settings.limitToSameFilesystem);
-    m_limitToSameFilesystemAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
-    setActionTooltip(m_limitToSameFilesystemAction,
-        tr("Stay on the current filesystem while scanning (refresh required)"));
-    connect(m_limitToSameFilesystemAction, &QAction::toggled, this, &MainWindow::onLimitToSameFilesystemToggled);
+    if (!isRunningInFlatpakSandbox()) {
+        m_limitToSameFilesystemAction = new QAction(
+            toolbarIcon({"freeze-row-column"},
+                QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")),
+            tr("Single Filesystem"),
+            this);
+        m_limitToSameFilesystemAction->setCheckable(true);
+        m_limitToSameFilesystemAction->setChecked(m_settings.limitToSameFilesystem);
+        m_limitToSameFilesystemAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
+        setActionTooltip(m_limitToSameFilesystemAction,
+            tr("Stay on the current filesystem while scanning (refresh required)"));
+        connect(m_limitToSameFilesystemAction, &QAction::toggled, this, &MainWindow::onLimitToSameFilesystemToggled);
+    }
 #endif
 
     m_toolbar->addSeparator();
@@ -563,9 +565,11 @@ void MainWindow::setupToolbar(QSettings& store)
     m_toolbar->addSeparator();
 
 #ifndef Q_OS_WIN
-    m_toolbar->addAction(m_limitToSameFilesystemAction);
-    if (QToolButton* singleFilesystemButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_limitToSameFilesystemAction))) {
-        singleFilesystemButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    if (m_limitToSameFilesystemAction) {
+        m_toolbar->addAction(m_limitToSameFilesystemAction);
+        if (QToolButton* singleFilesystemButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_limitToSameFilesystemAction))) {
+            singleFilesystemButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        }
     }
 #endif
 
@@ -763,7 +767,9 @@ void MainWindow::setupToolbar(QSettings& store)
     toolbarMenu->addAction(m_resetZoomAction);
     toolbarMenu->addSeparator();
 #ifndef Q_OS_WIN
-    toolbarMenu->addAction(m_limitToSameFilesystemAction);
+    if (m_limitToSameFilesystemAction) {
+        toolbarMenu->addAction(m_limitToSameFilesystemAction);
+    }
 #endif
     toolbarMenu->addAction(m_toggleFreeSpaceAction);
     toolbarMenu->addAction(m_toggleDirectoryTreeAction);

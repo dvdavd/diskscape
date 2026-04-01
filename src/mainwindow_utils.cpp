@@ -321,6 +321,16 @@ QString normalizedFilesystemPath(const QString& path)
     return normalized;
 }
 
+bool isRunningInFlatpakSandbox()
+{
+#ifdef Q_OS_LINUX
+    static const bool inFlatpak = QFileInfo::exists(QStringLiteral("/.flatpak-info"));
+    return inFlatpak;
+#else
+    return false;
+#endif
+}
+
 QList<BreadcrumbPathSegment> breadcrumbPathSegments(const QString& path)
 {
     const QString normalized = normalizedFilesystemPath(path);

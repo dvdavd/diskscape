@@ -12,6 +12,20 @@
 #include <QUuid>
 #include <cmath>
 
+namespace {
+
+bool isRunningInFlatpakSandbox()
+{
+#ifdef Q_OS_LINUX
+    static const bool inFlatpak = QFileInfo::exists(QStringLiteral("/.flatpak-info"));
+    return inFlatpak;
+#else
+    return false;
+#endif
+}
+
+} // namespace
+
 QColor defaultFreeSpaceColor()
 {
     if (QApplication::instance()) {
@@ -580,7 +594,9 @@ TreemapSettings TreemapSettings::load(QSettings& store)
     settings.lightModeColorThemeId = store.value("treemap/lightModeColorThemeId", settings.lightModeColorThemeId).toString();
     settings.darkModeColorThemeId = store.value("treemap/darkModeColorThemeId", settings.darkModeColorThemeId).toString();
     settings.followSystemColorTheme = store.value("treemap/followSystemColorTheme", settings.followSystemColorTheme).toBool();
-    settings.limitToSameFilesystem = store.value("treemap/limitToSameFilesystem", settings.limitToSameFilesystem).toBool();
+    settings.limitToSameFilesystem = isRunningInFlatpakSandbox()
+        ? false
+        : store.value("treemap/limitToSameFilesystem", settings.limitToSameFilesystem).toBool();
 
     const int themeCount = store.beginReadArray("treemap/colorThemes");
     if (themeCount > 0) {
@@ -686,6 +702,9 @@ void TreemapSettings::save(QSettings& store) const
 {
     TreemapSettings snapshot = *this;
     snapshot.sanitize();
+    if (isRunningInFlatpakSandbox()) {
+        snapshot.limitToSameFilesystem = false;
+    }
     store.setValue("treemap/headerHeight", snapshot.headerHeight);
     store.setValue("treemap/headerFontFamily", snapshot.headerFontFamily);
     store.setValue("treemap/headerFontSize", snapshot.headerFontSize);
