@@ -479,6 +479,7 @@ void TreemapSettings::sanitize()
     revealFadeHeight = qMax(0.0, revealFadeHeight);
     zoomDurationMs = qMax(0, zoomDurationMs);
     layoutDurationMs = qMax(0, layoutDurationMs);
+    wheelZoomStepPercent = qBound(0.1, wheelZoomStepPercent, 200.0);
     wheelZoomMinScale = qMax(0.01, wheelZoomMinScale);
     wheelZoomMaxScale = qMax(wheelZoomMinScale, wheelZoomMaxScale);
     cameraDurationMs = qMax(0, cameraDurationMs);
@@ -578,8 +579,10 @@ TreemapSettings TreemapSettings::load(QSettings& store)
                                             settings.minRevealHeight - settings.revealFadeHeight).toDouble());
     settings.zoomDurationMs = store.value("treemap/zoomDurationMs", settings.zoomDurationMs).toInt();
     settings.layoutDurationMs = store.value("treemap/layoutDurationMs", settings.layoutDurationMs).toInt();
+    settings.wheelZoomStepPercent = store.value("treemap/wheelZoomStepPercent", settings.wheelZoomStepPercent).toDouble();
     settings.wheelZoomMinScale = store.value("treemap/wheelZoomMinScale", settings.wheelZoomMinScale).toDouble();
     settings.wheelZoomMaxScale = store.value("treemap/wheelZoomMaxScale", settings.wheelZoomMaxScale).toDouble();
+    settings.fastWheelZoom = store.value("treemap/fastWheelZoom", settings.fastWheelZoom).toBool();
     settings.cameraDurationMs = store.value("treemap/cameraDurationMs", settings.cameraDurationMs).toInt();
     settings.cameraMaxScale = store.value("treemap/cameraMaxScale", settings.cameraMaxScale).toDouble();
     settings.parallelPartitionDepth = store.value("treemap/parallelPartitionDepth", settings.parallelPartitionDepth).toInt();
@@ -740,8 +743,10 @@ void TreemapSettings::save(QSettings& store) const
     store.setValue("treemap/revealFadeHeight", snapshot.revealFadeHeight);
     store.setValue("treemap/zoomDurationMs", snapshot.zoomDurationMs);
     store.setValue("treemap/layoutDurationMs", snapshot.layoutDurationMs);
+    store.setValue("treemap/wheelZoomStepPercent", snapshot.wheelZoomStepPercent);
     store.setValue("treemap/wheelZoomMinScale", snapshot.wheelZoomMinScale);
     store.setValue("treemap/wheelZoomMaxScale", snapshot.wheelZoomMaxScale);
+    store.setValue("treemap/fastWheelZoom", snapshot.fastWheelZoom);
     store.setValue("treemap/cameraDurationMs", snapshot.cameraDurationMs);
     store.setValue("treemap/cameraMaxScale", snapshot.cameraMaxScale);
     store.setValue("treemap/parallelPartitionDepth", snapshot.parallelPartitionDepth);

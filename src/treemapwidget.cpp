@@ -232,6 +232,7 @@ constexpr int kHoverAnimationMs      = 240;
 constexpr int kPressHoldMs           = 450;
 constexpr qreal kPressHoldMoveThreshold = 12.0;
 constexpr int kTouchTapSuppressMs    = 180;
+constexpr int kWheelZoomCoalesceMs   = 8;
 constexpr int kOverlayScrollBarThickness = 12;
 constexpr int kOverlayScrollBarInset = 4;
 constexpr int kOverlayScrollBarEndMargin = 10;
@@ -563,6 +564,11 @@ TreemapWidget::TreemapWidget(QWidget* parent)
         m_touchSuppressTap = false;
     });
 
+    m_wheelZoomCoalesceTimer.setSingleShot(true);
+    m_wheelZoomCoalesceTimer.setInterval(kWheelZoomCoalesceMs);
+    connect(&m_wheelZoomCoalesceTimer, &QTimer::timeout,
+            this, &TreemapWidget::applyPendingWheelZoom);
+
     m_zoomAnimation.setDuration(m_settings.zoomDurationMs);
     m_zoomAnimation.setStartValue(0.0);
     m_zoomAnimation.setEndValue(1.0);
@@ -617,6 +623,8 @@ TreemapWidget::TreemapWidget(QWidget* parent)
         viewport()->update();
     });
     connect(&m_cameraAnimation, &QVariantAnimation::finished, this, [this]() {
+        m_cameraPreviousFrame = QPixmap();
+        m_cameraNextFrame = QPixmap();
         m_continuousZoomSettleFramesRemaining = 2;
         m_cameraScale = m_cameraTargetScale;
         if (m_cameraUseFocusAnchor) {
@@ -946,16 +954,19 @@ void TreemapWidget::zoomCenteredIn()
         return;
     }
 
-    const qreal baseScale = m_cameraScale;
-    const qreal targetScale = std::clamp(baseScale * 1.13, kCameraMinScale, m_settings.cameraMaxScale);
+    const bool cameraAnimating = m_cameraAnimation.state() == QAbstractAnimation::Running;
+    const qreal baseScale = cameraAnimating ? m_cameraTargetScale : m_cameraScale;
+    const qreal zoomStepFactor = 1.0 + (m_settings.wheelZoomStepPercent / 100.0);
+    const qreal targetScale = std::clamp(baseScale * zoomStepFactor,
+                                         kCameraMinScale, m_settings.cameraMaxScale);
     if (qFuzzyCompare(targetScale, baseScale)) {
         return;
     }
 
     const QPointF center(viewport()->rect().center());
     const QPointF anchorScenePos(
-        m_cameraOrigin.x() + (center.x() / baseScale),
-        m_cameraOrigin.y() + (center.y() / baseScale));
+        m_cameraOrigin.x() + (center.x() / m_cameraScale),
+        m_cameraOrigin.y() + (center.y() / m_cameraScale));
     const QPointF targetOrigin(
         anchorScenePos.x() - (center.x() / targetScale),
         anchorScenePos.y() - (center.y() / targetScale));
@@ -980,16 +991,19 @@ void TreemapWidget::zoomCenteredOut()
         return;
     }
 
-    const qreal baseScale = m_cameraScale;
-    const qreal targetScale = std::clamp(baseScale / 1.13, kCameraMinScale, m_settings.cameraMaxScale);
+    const bool cameraAnimating = m_cameraAnimation.state() == QAbstractAnimation::Running;
+    const qreal baseScale = cameraAnimating ? m_cameraTargetScale : m_cameraScale;
+    const qreal zoomStepFactor = 1.0 + (m_settings.wheelZoomStepPercent / 100.0);
+    const qreal targetScale = std::clamp(baseScale / zoomStepFactor,
+                                         kCameraMinScale, m_settings.cameraMaxScale);
     if (qFuzzyCompare(targetScale, baseScale)) {
         return;
     }
 
     const QPointF center(viewport()->rect().center());
     const QPointF anchorScenePos(
-        m_cameraOrigin.x() + (center.x() / baseScale),
-        m_cameraOrigin.y() + (center.y() / baseScale));
+        m_cameraOrigin.x() + (center.x() / m_cameraScale),
+        m_cameraOrigin.y() + (center.y() / m_cameraScale));
     const QPointF targetOrigin(
         anchorScenePos.x() - (center.x() / targetScale),
         anchorScenePos.y() - (center.y() / targetScale));
@@ -1700,6 +1714,8 @@ void TreemapWidget::showOwnedTooltip(const QPoint& globalPos, FileNode* node, co
 
 void TreemapWidget::stopAnimatedNavigation()
 {
+    m_wheelZoomCoalesceTimer.stop();
+    m_pendingWheelSteps = 0.0;
     m_zoomAnimation.stop();
     m_cameraAnimation.stop();
     m_previousFrame = QPixmap();
@@ -1743,6 +1759,42 @@ void TreemapWidget::zoomCameraImmediate(qreal targetScale, const QPointF& anchor
     }
     syncScrollBars();
     viewport()->update();
+}
+
+void TreemapWidget::applyPendingWheelZoom()
+{
+    if (!m_current || qFuzzyIsNull(m_pendingWheelSteps)) {
+        m_pendingWheelSteps = 0.0;
+        return;
+    }
+
+    const qreal baseScale = m_cameraAnimation.state() == QAbstractAnimation::Running
+        ? m_cameraTargetScale
+        : m_cameraScale;
+    const qreal zoomStepFactor = 1.0 + (m_settings.wheelZoomStepPercent / 100.0);
+    const qreal targetScale = std::clamp(baseScale * std::pow(zoomStepFactor, m_pendingWheelSteps),
+                                         kCameraMinScale, m_settings.cameraMaxScale);
+    m_pendingWheelSteps = 0.0;
+    if (qFuzzyCompare(targetScale, baseScale)) {
+        return;
+    }
+
+    const QPointF targetOrigin(
+        m_pendingWheelAnchorScenePos.x() - (m_pendingWheelCursorPos.x() / targetScale),
+        m_pendingWheelAnchorScenePos.y() - (m_pendingWheelCursorPos.y() / targetScale));
+
+    if (targetScale > kZoomedInThreshold) {
+        m_semanticFocus = semanticFocusCandidateAt(m_pendingWheelCursorPos, currentRootViewRect());
+        m_semanticLiveRoot = m_current;
+    } else {
+        m_semanticFocus = nullptr;
+        m_semanticLiveRoot = nullptr;
+    }
+
+    const QPointF clampedOrigin = snapCameraOriginToPixelGrid(
+        clampCameraOrigin(targetOrigin, targetScale), targetScale, pixelScale());
+    animateCameraTo(targetScale, clampedOrigin,
+                    m_pendingWheelAnchorScenePos, m_pendingWheelCursorPos, true);
 }
 
 FileNode* TreemapWidget::interactiveNodeAt(const QPointF& pos) const
@@ -2686,6 +2738,7 @@ void TreemapWidget::rebuildSearchMetadataAsync()
             }
         }
 
+        index->arenaOwner = rootArena;
         return index;
     }));
 }
@@ -3327,6 +3380,24 @@ void TreemapWidget::animateCameraTo(qreal scale, const QPointF& origin,
     if (qFuzzyCompare(m_cameraStartScale, m_cameraTargetScale)
             && m_cameraStartOrigin == m_cameraTargetOrigin) {
         return;
+    }
+
+    if (m_settings.fastWheelZoom && m_current && !viewport()->size().isEmpty()) {
+        m_cameraPreviousFrame = renderSceneToPixmap(m_current).copy();
+        
+        const qreal savedScale = m_cameraScale;
+        const QPointF savedOrigin = m_cameraOrigin;
+        const int savedDepth = m_activeSemanticDepth;
+        
+        m_cameraScale = m_cameraTargetScale;
+        m_cameraOrigin = m_cameraTargetOrigin;
+        m_activeSemanticDepth = desiredSemanticDepthForScale(m_cameraTargetScale);
+        
+        m_cameraNextFrame = renderSceneToPixmap(m_current).copy();
+        
+        m_cameraScale = savedScale;
+        m_cameraOrigin = savedOrigin;
+        m_activeSemanticDepth = savedDepth;
     }
 
     m_cameraAnimation.start();
@@ -4267,9 +4338,10 @@ void TreemapWidget::paintEvent(QPaintEvent* event)
         // Bilinear sampling prevents 1-device-pixel jitter as the continuous
         // float source/dest rects shift between frames during the zoom.
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.fillRect(viewport()->rect(), palette().color(QPalette::Window));
         if (m_zoomingIn) {
-            painter.setOpacity(1.0 - 0.45 * progress);
+            // Keep the full-viewport source frame opaque so the window background
+            // never flashes through while the destination frame expands in.
+            painter.setOpacity(1.0);
             painter.drawPixmap(fullRect, m_previousFrame, previousShrinkingSourceRect);
 
             painter.setOpacity(progress);
@@ -4278,13 +4350,52 @@ void TreemapWidget::paintEvent(QPaintEvent* event)
             // Zoom the parent scene back out from the destination tile so
             // zoom-out reads like the inverse of zoom-in instead of a static
             // background with only the departing folder moving.
-            painter.setOpacity(0.55 + (0.45 * progress));
+            painter.setOpacity(1.0);
             painter.drawPixmap(fullRect, m_nextFrame, nextExpandingSourceRect);
 
             // Shrink the outgoing scene into the tile while fading it away.
             painter.setOpacity(std::max<qreal>(0.0, 1.0 - (1.1 * progress)));
             painter.drawPixmap(shrinkingRect, m_previousFrame, previousFullSourceRect);
         }
+        painter.setOpacity(1.0);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        return;
+    }
+
+    if (m_cameraAnimation.state() == QAbstractAnimation::Running
+            && m_settings.fastWheelZoom
+            && !m_cameraPreviousFrame.isNull() && !m_cameraNextFrame.isNull()) {
+        const qreal t = m_cameraAnimation.currentValue().toReal();
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+        const qreal curScale = m_cameraScale;
+        const QPointF curOrigin = m_cameraOrigin;
+        const QRectF vpRect(0, 0, viewport()->width(), viewport()->height());
+
+        const qreal prevRatio = curScale / m_cameraStartScale;
+        const QPointF prevOffset = (m_cameraStartOrigin - curOrigin) * curScale;
+        const QRectF prevRect(prevOffset.x(), prevOffset.y(),
+                              vpRect.width() * prevRatio, vpRect.height() * prevRatio);
+
+        const qreal nextRatio = curScale / m_cameraTargetScale;
+        const QPointF nextOffset = (m_cameraTargetOrigin - curOrigin) * curScale;
+        const QRectF nextRect(nextOffset.x(), nextOffset.y(),
+                              vpRect.width() * nextRatio, vpRect.height() * nextRatio);
+
+        const bool previousCoversViewport = prevRect.width() >= vpRect.width()
+            && prevRect.height() >= vpRect.height();
+        if (previousCoversViewport) {
+            painter.setOpacity(1.0);
+            painter.drawPixmap(prevRect, m_cameraPreviousFrame, QRectF(m_cameraPreviousFrame.rect()));
+            painter.setOpacity(t);
+            painter.drawPixmap(nextRect, m_cameraNextFrame, QRectF(m_cameraNextFrame.rect()));
+        } else {
+            painter.setOpacity(1.0);
+            painter.drawPixmap(nextRect, m_cameraNextFrame, QRectF(m_cameraNextFrame.rect()));
+            painter.setOpacity(1.0 - t);
+            painter.drawPixmap(prevRect, m_cameraPreviousFrame, QRectF(m_cameraPreviousFrame.rect()));
+        }
+
         painter.setOpacity(1.0);
         painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
         return;
@@ -4611,11 +4722,10 @@ void TreemapWidget::wheelEvent(QWheelEvent* event)
     const QPoint pixelDelta = event->pixelDelta();
     const QPoint angleDelta = event->angleDelta();
 
-    const qreal baseScale = m_cameraScale;
     const QPointF cursorPos = event->position();
     const QPointF anchorScenePos(
-        m_cameraOrigin.x() + (cursorPos.x() / baseScale),
-        m_cameraOrigin.y() + (cursorPos.y() / baseScale));
+        m_cameraOrigin.x() + (cursorPos.x() / m_cameraScale),
+        m_cameraOrigin.y() + (cursorPos.y() / m_cameraScale));
 
 #ifdef Q_OS_MACOS
     const bool looksLikeTrackpadScroll = !pixelDelta.isNull() || event->phase() != Qt::NoScrollPhase;
@@ -4649,28 +4759,12 @@ void TreemapWidget::wheelEvent(QWheelEvent* event)
         return;
     }
 
-    const qreal targetScale = std::clamp(baseScale * std::pow(1.13, wheelSteps),
-                                         kCameraMinScale, m_settings.cameraMaxScale);
-    if (qFuzzyCompare(targetScale, baseScale)) {
-        event->accept();
-        return;
+    m_pendingWheelSteps += wheelSteps;
+    m_pendingWheelAnchorScenePos = anchorScenePos;
+    m_pendingWheelCursorPos = cursorPos;
+    if (!m_wheelZoomCoalesceTimer.isActive()) {
+        m_wheelZoomCoalesceTimer.start();
     }
-
-    const QPointF targetOrigin(
-        anchorScenePos.x() - (cursorPos.x() / targetScale),
-        anchorScenePos.y() - (cursorPos.y() / targetScale));
-
-    if (targetScale > kZoomedInThreshold) {
-        m_semanticFocus = semanticFocusCandidateAt(cursorPos, currentRootViewRect());
-        m_semanticLiveRoot = m_current;
-    } else {
-        m_semanticFocus = nullptr;
-        m_semanticLiveRoot = nullptr;
-    }
-
-    const QPointF clampedOrigin = snapCameraOriginToPixelGrid(
-        clampCameraOrigin(targetOrigin, targetScale), targetScale, pixelScale());
-    animateCameraTo(targetScale, clampedOrigin, anchorScenePos, cursorPos, true);
     event->accept();
 }
 

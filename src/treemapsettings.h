@@ -114,9 +114,11 @@ struct TreemapSettings {
     double revealFadeHeight = 10.0;
     int zoomDurationMs = 180;
     int layoutDurationMs = 90;
+    double wheelZoomStepPercent = 20.0;
     double wheelZoomMinScale = 0.38;
     double wheelZoomMaxScale = 0.72;
     int cameraDurationMs = 140;
+    bool fastWheelZoom = false;
     double cameraMaxScale = 256.0;
     int parallelPartitionDepth = 3;
     int maxSemanticDepth = 20;

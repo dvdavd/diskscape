@@ -478,6 +478,9 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_revealFadeWidth = createDoubleSpinBox(0.0, 1000.0, 1.0, 0);
     m_zoomDurationMs = createSpinBox(0, 5000, 10);
     m_cameraDurationMs = createSpinBox(0, 5000, 10);
+    m_wheelZoomStepPercent = createDoubleSpinBox(0.1, 200.0, 1.0, 1);
+    m_wheelZoomStepPercent->setSuffix(tr("%"));
+    m_fastWheelZoom = new QCheckBox(tr("Use fast wheel zoom animation (stretch/blend)"), this);
     m_simpleTooltips = new QCheckBox(tr("Use smaller, simpler tooltips in the treemap"));
     m_cameraMaxScale = new QSlider(Qt::Horizontal, this);
     m_cameraMaxScale->setRange(1, 512);
@@ -585,6 +588,11 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     motionForm->addRow(tr("Camera duration (ms)"),
                        createFieldWithDescription(m_cameraDurationMs,
                            tr("Length of wheel-zoom camera motion. Set to zero for instant movement.")));
+    motionForm->addRow(tr("Wheel zoom step"),
+                       createFieldWithDescription(m_wheelZoomStepPercent,
+                           tr("Scale change applied for each wheel step. Higher values zoom faster.")));
+    motionForm->addRow(tr("Zoom optimisation"),
+                       createFieldWithDescription(m_fastWheelZoom, QString()));
     appearanceControlsLayout->addWidget(createSectionGroup(
         tr("Animation timing"),
         tr("Set zoom and camera animation speed."),
@@ -1431,6 +1439,8 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_revealFadeWidth->setValue(settings.revealFadeWidth);
     m_zoomDurationMs->setValue(settings.zoomDurationMs);
     m_cameraDurationMs->setValue(settings.cameraDurationMs);
+    m_wheelZoomStepPercent->setValue(settings.wheelZoomStepPercent);
+    m_fastWheelZoom->setChecked(settings.fastWheelZoom);
     m_simpleTooltips->setChecked(settings.simpleTooltips);
     m_cameraMaxScale->setValue(static_cast<int>(std::round(settings.cameraMaxScale)));
     m_cameraMaxScaleValue->setText(QString::number(static_cast<int>(std::round(settings.cameraMaxScale))));
@@ -1486,6 +1496,8 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.revealFadeWidth = m_revealFadeWidth->value();
     currentSettings.zoomDurationMs = m_zoomDurationMs->value();
     currentSettings.cameraDurationMs = m_cameraDurationMs->value();
+    currentSettings.wheelZoomStepPercent = m_wheelZoomStepPercent->value();
+    currentSettings.fastWheelZoom = m_fastWheelZoom->isChecked();
     currentSettings.simpleTooltips = m_simpleTooltips->isChecked();
     currentSettings.cameraMaxScale = m_cameraMaxScale->value();
     currentSettings.liveScanPreview = m_liveScanPreview->isChecked();

@@ -49,6 +49,7 @@ struct SearchIndex {
     QHash<uint64_t, std::vector<FileNode*>> filesByExt; // packed extension key → matching files
     std::string flatNames;             // flat UTF-8 buffer of all case-folded names
     uint32_t nodeCount = 0;
+    std::shared_ptr<NodeArena> arenaOwner;
 };
 
 struct SearchMatchResult {
@@ -266,6 +267,7 @@ private:
     void panCameraImmediate(const QPointF& sceneDelta);
     void zoomCameraImmediate(qreal targetScale, const QPointF& anchorScenePos,
                              const QPointF& anchorScreenPos);
+    void applyPendingWheelZoom();
     FileNode* interactiveNodeAt(const QPointF& pos) const;
     void updateHoverAt(const QPointF& pos, const QPoint& globalPos, bool notify = true);
     void refreshHoverUnderPointer();
@@ -310,6 +312,8 @@ private:
     QPixmap m_nextFrame;
     QPixmap m_layoutPreviousFrame;
     QPixmap m_layoutNextFrame;
+    QPixmap m_cameraPreviousFrame;
+    QPixmap m_cameraNextFrame;
     QPixmap m_liveFrame;
     QPixmap m_scrollBuffer;
     QSize   m_liveFrameDeviceSize;
@@ -356,6 +360,10 @@ private:
     FileNode* m_pendingRestoredSemanticFocus = nullptr;
     FileNode* m_pendingRestoredSemanticLiveRoot = nullptr;
     int m_continuousZoomSettleFramesRemaining = 0;
+    QTimer m_wheelZoomCoalesceTimer;
+    qreal m_pendingWheelSteps = 0.0;
+    QPointF m_pendingWheelAnchorScenePos;
+    QPointF m_pendingWheelCursorPos;
     TreemapSettings m_settings;
     int m_activeSemanticDepth = TreemapSettings::defaults().baseVisibleDepth;
     FileNode* m_semanticFocus = nullptr;

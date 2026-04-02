@@ -2252,6 +2252,7 @@ void MainWindow::refreshTypeLegendAsync(FileNode* root)
     auto summaries = std::make_shared<QList<FileTypeSummary>>();
     FileNode* const legendRoot = root;
     FileNode* const scanRoot = m_scanResult.root;
+    const std::shared_ptr<NodeArena> legendArena = m_scanResult.arena;
     auto* watcher = new QFutureWatcher<void>(this);
     connect(watcher, &QFutureWatcher<void>::finished, this,
             [this, watcher, legendRoot, scanRoot, summaries]() {
@@ -2268,7 +2269,11 @@ void MainWindow::refreshTypeLegendAsync(FileNode* root)
             });
     std::vector<bool> searchReach = m_treemapWidget ? m_treemapWidget->captureSearchReachSnapshot()
                                                     : std::vector<bool>{};
-    watcher->setFuture(QtConcurrent::run([legendRoot, summaries, searchReach = std::move(searchReach)]() {
+    watcher->setFuture(QtConcurrent::run([legendRoot, legendArena, summaries,
+                                          searchReach = std::move(searchReach)]() {
+        if (!legendArena) {
+            return;
+        }
         *summaries = collectAndSortFileSummaries(legendRoot, searchReach);
     }));
 }
@@ -2361,6 +2366,7 @@ void MainWindow::onScanFinished()
     }();
     m_postProcessStale = true;
     if (m_directoryTree) m_directoryTree->clear();
+    m_mountPointFreeNode = nullptr;
     m_scanResult = m_watcher->future().takeResult();
     m_freeSpaceNodes.clear();
     if (!m_scanResult.root) {
