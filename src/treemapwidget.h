@@ -361,6 +361,8 @@ private:
     FileNode* m_pendingRestoredSemanticLiveRoot = nullptr;
     int m_continuousZoomSettleFramesRemaining = 0;
     QTimer m_wheelZoomCoalesceTimer;
+    QTimer m_trackpadBackReadyTimer;
+    bool m_trackpadBackReady = false;
     qreal m_pendingWheelSteps = 0.0;
     QPointF m_pendingWheelAnchorScenePos;
     QPointF m_pendingWheelCursorPos;
@@ -413,6 +415,7 @@ private:
     bool m_nativeGestureActive = false;
     bool m_nativeGesturePinching = false;
     bool m_nativeGesturePendingBackOnEnd = false;
+    qreal m_nativeGesturePinchInitialScale = 1.0;
     QPointF m_nativeGestureAnchorScenePos;
     qreal m_hoverBlend = 1.0;
     bool m_ownsTooltip = false;

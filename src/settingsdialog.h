@@ -123,6 +123,7 @@ private:
     QSpinBox* m_cameraDurationMs = nullptr;
     QDoubleSpinBox* m_wheelZoomStepPercent = nullptr;
     QCheckBox* m_fastWheelZoom = nullptr;
+    QCheckBox* m_trackpadScrollPans = nullptr;
     QCheckBox* m_simpleTooltips = nullptr;
     QSlider* m_cameraMaxScale = nullptr;
     QLabel* m_cameraMaxScaleValue = nullptr;

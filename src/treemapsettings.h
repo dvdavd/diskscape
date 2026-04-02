@@ -119,6 +119,7 @@ struct TreemapSettings {
     double wheelZoomMaxScale = 0.72;
     int cameraDurationMs = 140;
     bool fastWheelZoom = false;
+    bool trackpadScrollPans = false;
     double cameraMaxScale = 256.0;
     int parallelPartitionDepth = 3;
     int maxSemanticDepth = 20;

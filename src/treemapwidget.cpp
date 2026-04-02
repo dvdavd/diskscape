@@ -232,7 +232,8 @@ constexpr int kHoverAnimationMs      = 240;
 constexpr int kPressHoldMs           = 450;
 constexpr qreal kPressHoldMoveThreshold = 12.0;
 constexpr int kTouchTapSuppressMs    = 180;
-constexpr int kWheelZoomCoalesceMs   = 8;
+constexpr int kWheelZoomCoalesceMs    = 8;
+constexpr int kTrackpadBackReadyMs    = 400;
 constexpr int kOverlayScrollBarThickness = 12;
 constexpr int kOverlayScrollBarInset = 4;
 constexpr int kOverlayScrollBarEndMargin = 10;
@@ -569,6 +570,11 @@ TreemapWidget::TreemapWidget(QWidget* parent)
     connect(&m_wheelZoomCoalesceTimer, &QTimer::timeout,
             this, &TreemapWidget::applyPendingWheelZoom);
 
+    m_trackpadBackReadyTimer.setSingleShot(true);
+    m_trackpadBackReadyTimer.setInterval(kTrackpadBackReadyMs);
+    connect(&m_trackpadBackReadyTimer, &QTimer::timeout,
+            this, [this] { m_trackpadBackReady = true; });
+
     m_zoomAnimation.setDuration(m_settings.zoomDurationMs);
     m_zoomAnimation.setStartValue(0.0);
     m_zoomAnimation.setEndValue(1.0);
@@ -794,6 +800,7 @@ bool TreemapWidget::viewportEvent(QEvent* event)
                 m_nativeGestureAnchorScenePos = QPointF(
                     m_cameraOrigin.x() + (anchorScreenPos.x() / m_cameraScale),
                     m_cameraOrigin.y() + (anchorScreenPos.y() / m_cameraScale));
+                m_nativeGesturePinchInitialScale = m_cameraScale;
                 m_nativeGesturePinching = true;
                 m_nativeGestureActive = true;
                 if (m_cameraScale > kZoomedInThreshold) {
@@ -806,7 +813,9 @@ bool TreemapWidget::viewportEvent(QEvent* event)
             const qreal rawTargetScale = m_cameraScale * zoomFactor;
             const qreal targetScale = std::clamp(rawTargetScale, kCameraMinScale, m_settings.cameraMaxScale);
 
-            if (rawTargetScale < kCameraMinScale && m_current && m_current->parent) {
+            if (rawTargetScale < kCameraMinScale
+                    && m_nativeGesturePinchInitialScale <= (kCameraMinScale + 0.0001)
+                    && m_current && m_current->parent) {
                 m_nativeGesturePendingBackOnEnd = true;
             } else if (targetScale > kCameraMinScale + 0.0001) {
                 m_nativeGesturePendingBackOnEnd = false;
@@ -1715,6 +1724,8 @@ void TreemapWidget::showOwnedTooltip(const QPoint& globalPos, FileNode* node, co
 void TreemapWidget::stopAnimatedNavigation()
 {
     m_wheelZoomCoalesceTimer.stop();
+    m_trackpadBackReadyTimer.stop();
+    m_trackpadBackReady = false;
     m_pendingWheelSteps = 0.0;
     m_zoomAnimation.stop();
     m_cameraAnimation.stop();
@@ -4750,6 +4761,74 @@ void TreemapWidget::wheelEvent(QWheelEvent* event)
         return;
     }
 #endif
+
+    const bool hasCtrl = event->modifiers() & Qt::ControlModifier;
+
+    // Scale pan distance by the system scroll-lines preference so the user's desktop
+    // speed setting is respected. 11 px/line gives ~33 px/notch at the default of 3 lines.
+    const qreal kScrollPanStep = 11.0 * QApplication::wheelScrollLines();
+
+    // Horizontal scroll always pans (works for both trackpad and H-scroll mice).
+    if (!hasCtrl && angleDelta.x() != 0 && angleDelta.y() == 0) {
+        stopAnimatedNavigation();
+        clearHoverState();
+        panCameraImmediate(QPointF(-(angleDelta.x() / 120.0) * kScrollPanStep / m_cameraScale, 0.0));
+        event->accept();
+        return;
+    }
+
+    // In trackpad-scroll-pans mode: plain scroll pans, Ctrl+scroll zooms immediately
+    // (no coalesce timer — pinch events are live and should track the gesture frame-exact).
+    // Otherwise (mouse mode): all scroll goes through the animated coalesce path.
+    if (m_settings.trackpadScrollPans) {
+        // Let the back-navigation zoom animation play out uninterrupted.
+        if (m_zoomAnimation.state() == QAbstractAnimation::Running) {
+            event->accept();
+            return;
+        }
+        const bool savedBackReady = m_trackpadBackReady;
+        stopAnimatedNavigation();
+        m_trackpadBackReady = savedBackReady;
+        clearHoverState();
+        if (!hasCtrl) {
+            panCameraImmediate(QPointF(-(angleDelta.x() / 120.0) * kScrollPanStep / m_cameraScale,
+                                       -(angleDelta.y() / 120.0) * kScrollPanStep / m_cameraScale));
+        } else {
+            const qreal steps = angleDelta.y() != 0 ? angleDelta.y() / 120.0 : pixelDelta.y() / 120.0;
+            if (!qFuzzyIsNull(steps)) {
+                if (steps < 0 && m_cameraScale <= (kCameraMinScale + 0.0001)
+                        && m_current && m_current->parent) {
+                    if (m_trackpadBackReady) {
+                        // Deliberate new pinch after a pause at minimum — go back.
+                        m_trackpadBackReady = false;
+                        event->accept();
+                        emit backRequested();
+                        return;
+                    }
+                    // Still in the original gesture: keep pushing the ready timer back.
+                    m_trackpadBackReadyTimer.start();
+                    event->accept();
+                    return;
+                }
+                // Zooming in — cancel any pending ready state.
+                m_trackpadBackReadyTimer.stop();
+                m_trackpadBackReady = false;
+                const qreal zoomStepFactor = 1.0 + (m_settings.wheelZoomStepPercent / 100.0);
+                const qreal targetScale = std::clamp(m_cameraScale * std::pow(zoomStepFactor, steps),
+                                                     kCameraMinScale, m_settings.cameraMaxScale);
+                if (targetScale > kZoomedInThreshold) {
+                    m_semanticFocus = semanticFocusCandidateAt(cursorPos, currentRootViewRect());
+                    m_semanticLiveRoot = m_current;
+                } else {
+                    m_semanticFocus = nullptr;
+                    m_semanticLiveRoot = nullptr;
+                }
+                zoomCameraImmediate(targetScale, anchorScenePos, cursorPos);
+            }
+        }
+        event->accept();
+        return;
+    }
 
     const qreal wheelSteps = angleDelta.y() != 0
         ? angleDelta.y() / 120.0

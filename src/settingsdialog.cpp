@@ -481,6 +481,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_wheelZoomStepPercent = createDoubleSpinBox(0.1, 200.0, 1.0, 1);
     m_wheelZoomStepPercent->setSuffix(tr("%"));
     m_fastWheelZoom = new QCheckBox(tr("Use fast wheel zoom animation (stretch/blend)"), this);
+    m_trackpadScrollPans = new QCheckBox(tr("Scroll pans, Ctrl+scroll zooms (trackpad mode)"), this);
     m_simpleTooltips = new QCheckBox(tr("Use smaller, simpler tooltips in the treemap"));
     m_cameraMaxScale = new QSlider(Qt::Horizontal, this);
     m_cameraMaxScale->setRange(1, 512);
@@ -593,6 +594,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
                            tr("Scale change applied for each wheel step. Higher values zoom faster.")));
     motionForm->addRow(tr("Zoom optimisation"),
                        createFieldWithDescription(m_fastWheelZoom, QString()));
+    motionForm->addRow(QString(), m_trackpadScrollPans);
     appearanceControlsLayout->addWidget(createSectionGroup(
         tr("Animation timing"),
         tr("Set zoom and camera animation speed."),
@@ -1441,6 +1443,7 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_cameraDurationMs->setValue(settings.cameraDurationMs);
     m_wheelZoomStepPercent->setValue(settings.wheelZoomStepPercent);
     m_fastWheelZoom->setChecked(settings.fastWheelZoom);
+    m_trackpadScrollPans->setChecked(settings.trackpadScrollPans);
     m_simpleTooltips->setChecked(settings.simpleTooltips);
     m_cameraMaxScale->setValue(static_cast<int>(std::round(settings.cameraMaxScale)));
     m_cameraMaxScaleValue->setText(QString::number(static_cast<int>(std::round(settings.cameraMaxScale))));
@@ -1498,6 +1501,7 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.cameraDurationMs = m_cameraDurationMs->value();
     currentSettings.wheelZoomStepPercent = m_wheelZoomStepPercent->value();
     currentSettings.fastWheelZoom = m_fastWheelZoom->isChecked();
+    currentSettings.trackpadScrollPans = m_trackpadScrollPans->isChecked();
     currentSettings.simpleTooltips = m_simpleTooltips->isChecked();
     currentSettings.cameraMaxScale = m_cameraMaxScale->value();
     currentSettings.liveScanPreview = m_liveScanPreview->isChecked();

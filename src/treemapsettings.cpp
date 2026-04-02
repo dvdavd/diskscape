@@ -583,6 +583,7 @@ TreemapSettings TreemapSettings::load(QSettings& store)
     settings.wheelZoomMinScale = store.value("treemap/wheelZoomMinScale", settings.wheelZoomMinScale).toDouble();
     settings.wheelZoomMaxScale = store.value("treemap/wheelZoomMaxScale", settings.wheelZoomMaxScale).toDouble();
     settings.fastWheelZoom = store.value("treemap/fastWheelZoom", settings.fastWheelZoom).toBool();
+    settings.trackpadScrollPans = store.value("treemap/trackpadScrollPans", settings.trackpadScrollPans).toBool();
     settings.cameraDurationMs = store.value("treemap/cameraDurationMs", settings.cameraDurationMs).toInt();
     settings.cameraMaxScale = store.value("treemap/cameraMaxScale", settings.cameraMaxScale).toDouble();
     settings.parallelPartitionDepth = store.value("treemap/parallelPartitionDepth", settings.parallelPartitionDepth).toInt();
@@ -747,6 +748,7 @@ void TreemapSettings::save(QSettings& store) const
     store.setValue("treemap/wheelZoomMinScale", snapshot.wheelZoomMinScale);
     store.setValue("treemap/wheelZoomMaxScale", snapshot.wheelZoomMaxScale);
     store.setValue("treemap/fastWheelZoom", snapshot.fastWheelZoom);
+    store.setValue("treemap/trackpadScrollPans", snapshot.trackpadScrollPans);
     store.setValue("treemap/cameraDurationMs", snapshot.cameraDurationMs);
     store.setValue("treemap/cameraMaxScale", snapshot.cameraMaxScale);
     store.setValue("treemap/parallelPartitionDepth", snapshot.parallelPartitionDepth);

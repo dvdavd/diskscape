@@ -95,17 +95,17 @@
     <message>
         <location filename="../src/colorutils.cpp" line="496"/>
         <location filename="../src/mainwindow_utils.cpp" line="701"/>
-        <location filename="../src/treemapwidget.cpp" line="2785"/>
+        <location filename="../src/treemapwidget.cpp" line="2797"/>
         <source>No extension</source>
         <translation>No extension</translation>
     </message>
     <message>
         <location filename="../src/colorutils.cpp" line="508"/>
-        <location filename="../src/mainwindow.cpp" line="3213"/>
+        <location filename="../src/mainwindow.cpp" line="3219"/>
         <location filename="../src/mainwindow_utils.cpp" line="677"/>
         <location filename="../src/mainwindow_utils.cpp" line="780"/>
-        <location filename="../src/treemapwidget.cpp" line="1887"/>
-        <location filename="../src/treemapwidget.cpp" line="2784"/>
+        <location filename="../src/treemapwidget.cpp" line="1898"/>
+        <location filename="../src/treemapwidget.cpp" line="2796"/>
         <source>Free Space</source>
         <translation>Free Space</translation>
     </message>
@@ -219,22 +219,22 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="384"/>
-        <location filename="../src/mainwindow.cpp" line="3007"/>
-        <location filename="../src/mainwindow.cpp" line="3016"/>
+        <location filename="../src/mainwindow.cpp" line="3013"/>
+        <location filename="../src/mainwindow.cpp" line="3022"/>
         <source>Delete Permanently</source>
         <translation>Delete Permanently</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="385"/>
-        <location filename="../src/mainwindow.cpp" line="3007"/>
-        <location filename="../src/mainwindow.cpp" line="3017"/>
+        <location filename="../src/mainwindow.cpp" line="3013"/>
+        <location filename="../src/mainwindow.cpp" line="3023"/>
         <source>Move to Wastebin</source>
         <translation>Move to Trash</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="438"/>
-        <location filename="../src/mainwindow.cpp" line="2849"/>
-        <location filename="../src/mainwindow.cpp" line="2876"/>
+        <location filename="../src/mainwindow.cpp" line="2855"/>
+        <location filename="../src/mainwindow.cpp" line="2882"/>
         <source>Open</source>
         <translation>Open</translation>
     </message>
@@ -250,14 +250,14 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="497"/>
-        <location filename="../src/mainwindow.cpp" line="2863"/>
-        <location filename="../src/mainwindow.cpp" line="3595"/>
+        <location filename="../src/mainwindow.cpp" line="2869"/>
+        <location filename="../src/mainwindow.cpp" line="3601"/>
         <source>Refresh</source>
         <translation>Refresh</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="531"/>
-        <location filename="../src/mainwindow.cpp" line="2840"/>
+        <location filename="../src/mainwindow.cpp" line="2846"/>
         <source>Zoom In</source>
         <translation>Zoom In</translation>
     </message>
@@ -445,7 +445,7 @@ Find what’s using space at a glance.</translation>
     <message>
         <location filename="../src/mainwindow.cpp" line="1538"/>
         <location filename="../src/mainwindow.cpp" line="1544"/>
-        <location filename="../src/mainwindow.cpp" line="2461"/>
+        <location filename="../src/mainwindow.cpp" line="2467"/>
         <source>Cancelling refresh...</source>
         <translation>Canceling refresh...</translation>
     </message>
@@ -462,7 +462,7 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1666"/>
-        <location filename="../src/mainwindow.cpp" line="2708"/>
+        <location filename="../src/mainwindow.cpp" line="2714"/>
         <source>Refreshing %1...</source>
         <translation>Refreshing %1...</translation>
     </message>
@@ -506,27 +506,27 @@ Find what’s using space at a glance.</translation>
         <translation>Scanning: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2425"/>
+        <location filename="../src/mainwindow.cpp" line="2431"/>
         <source>Files: %1</source>
         <translation>Files: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2429"/>
+        <location filename="../src/mainwindow.cpp" line="2435"/>
         <source>Total: %1</source>
         <translation>Total: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2433"/>
+        <location filename="../src/mainwindow.cpp" line="2439"/>
         <source>Free: %1</source>
         <translation>Free: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2437"/>
+        <location filename="../src/mainwindow.cpp" line="2443"/>
         <source>Refreshed</source>
         <translation>Refreshed</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2323"/>
+        <location filename="../src/mainwindow.cpp" line="2328"/>
         <source>Starting next scan...</source>
         <translation>Starting next scan...</translation>
     </message>
@@ -628,120 +628,120 @@ Diskscape is licensed under the MIT License.</translation>
         <translation>Open the application menu (F10)</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2323"/>
+        <location filename="../src/mainwindow.cpp" line="2328"/>
         <source>Scan cancelled</source>
         <translation>Scan canceled</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2374"/>
+        <location filename="../src/mainwindow.cpp" line="2380"/>
         <source>Refresh failed</source>
         <translation>Refresh failed</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2374"/>
+        <location filename="../src/mainwindow.cpp" line="2380"/>
         <source>Scan failed</source>
         <translation>Scan failed</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2461"/>
+        <location filename="../src/mainwindow.cpp" line="2467"/>
         <source>Cancelling scan...</source>
         <translation>Canceling scan...</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2471"/>
+        <location filename="../src/mainwindow.cpp" line="2477"/>
         <source>Ready</source>
         <translation>Ready</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2855"/>
-        <location filename="../src/mainwindow.cpp" line="2887"/>
+        <location filename="../src/mainwindow.cpp" line="2861"/>
+        <location filename="../src/mainwindow.cpp" line="2893"/>
         <source>Copy Path</source>
         <translation>Copy Path</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2870"/>
-        <location filename="../src/mainwindow.cpp" line="2894"/>
+        <location filename="../src/mainwindow.cpp" line="2876"/>
+        <location filename="../src/mainwindow.cpp" line="2900"/>
         <source>Properties</source>
         <translation>Properties</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2881"/>
+        <location filename="../src/mainwindow.cpp" line="2887"/>
         <source>Show in File Manager</source>
         <translation>Show in File Manager</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2904"/>
+        <location filename="../src/mainwindow.cpp" line="2910"/>
         <source>You do not have permission to delete this item</source>
         <translation>You do not have permission to delete this item</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2906"/>
+        <location filename="../src/mainwindow.cpp" line="2912"/>
         <source>Cannot delete while a scan is in progress</source>
         <translation>Cannot delete while a scan is in progress</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2939"/>
+        <location filename="../src/mainwindow.cpp" line="2945"/>
         <source>Copied path: %1</source>
         <translation>Copied path: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2958"/>
+        <location filename="../src/mainwindow.cpp" line="2964"/>
         <source>Failed to delete: %1</source>
         <translation>Failed to delete: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2959"/>
+        <location filename="../src/mainwindow.cpp" line="2965"/>
         <source>Failed to move to wastebin: %1</source>
         <translation>Failed to move to trash: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="2991"/>
+        <location filename="../src/mainwindow.cpp" line="2997"/>
         <source>Failed to open: %1</source>
         <translation>Failed to open: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3009"/>
+        <location filename="../src/mainwindow.cpp" line="3015"/>
         <source>Delete %1 permanently?</source>
         <translation>Delete %1 permanently?</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3010"/>
+        <location filename="../src/mainwindow.cpp" line="3016"/>
         <source>Move %1 to the wastebin?</source>
         <translation>Move %1 to the trash?</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3012"/>
+        <location filename="../src/mainwindow.cpp" line="3018"/>
         <source>This will permanently remove it from disk.</source>
         <translation>This will permanently remove it from disk.</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3013"/>
+        <location filename="../src/mainwindow.cpp" line="3019"/>
         <source>You can restore it later from the system wastebin if supported.</source>
         <translation>You can restore it later from the system trash if supported.</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3164"/>
-        <location filename="../src/mainwindow.cpp" line="3361"/>
+        <location filename="../src/mainwindow.cpp" line="3170"/>
+        <location filename="../src/mainwindow.cpp" line="3367"/>
         <source>Free Space: %1</source>
         <translation>Free Space: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3363"/>
+        <location filename="../src/mainwindow.cpp" line="3369"/>
         <source>%1  (%2)</source>
         <translation>%1  (%2)</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3608"/>
+        <location filename="../src/mainwindow.cpp" line="3614"/>
         <source>Cancel</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3620"/>
+        <location filename="../src/mainwindow.cpp" line="3626"/>
         <source>Refreshing</source>
         <translation>Refreshing</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3752"/>
+        <location filename="../src/mainwindow.cpp" line="3758"/>
         <source>Refreshed: %1</source>
         <translation>Refreshed: %1</translation>
     </message>
@@ -932,26 +932,31 @@ Diskscape is licensed under the MIT License.</translation>
     </message>
     <message>
         <location filename="../src/settingsdialog.cpp" line="484"/>
+        <source>Scroll pans, Ctrl+scroll zooms (trackpad mode)</source>
+        <translation>Scroll pans, Ctrl+scroll zooms (trackpad mode)</translation>
+    </message>
+    <message>
+        <location filename="../src/settingsdialog.cpp" line="485"/>
         <source>Use smaller, simpler tooltips in the treemap</source>
         <translation>Use smaller, simpler tooltips in the treemap</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="492"/>
+        <location filename="../src/settingsdialog.cpp" line="493"/>
         <source>Enable live updates while scanning (slightly slower)</source>
         <translation>Enable live updates while scanning (slightly slower)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="497"/>
+        <location filename="../src/settingsdialog.cpp" line="498"/>
         <source>Use random colours for unspecified file types</source>
         <translation>Use random colors for unspecified file types</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="504"/>
+        <location filename="../src/settingsdialog.cpp" line="505"/>
         <source>%1%</source>
         <translation>%1%</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="527"/>
+        <location filename="../src/settingsdialog.cpp" line="528"/>
         <source>png
 jpg
 gif</source>
@@ -960,554 +965,554 @@ jpg
 gif</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="542"/>
+        <location filename="../src/settingsdialog.cpp" line="543"/>
         <source>Adjust appearance</source>
         <translation>Adjust appearance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="543"/>
+        <location filename="../src/settingsdialog.cpp" line="544"/>
         <source>Control tile shape, labels, and motion.</source>
         <translation>Control tile shape, labels, and motion.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="561"/>
+        <location filename="../src/settingsdialog.cpp" line="562"/>
         <source>Header height</source>
         <translation>Header height</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="563"/>
+        <location filename="../src/settingsdialog.cpp" line="564"/>
         <source>Header font</source>
         <translation>Header font</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="567"/>
+        <location filename="../src/settingsdialog.cpp" line="568"/>
         <source>File font</source>
         <translation>File font</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="571"/>
-        <location filename="../src/settingsdialog.cpp" line="700"/>
+        <location filename="../src/settingsdialog.cpp" line="572"/>
+        <location filename="../src/settingsdialog.cpp" line="702"/>
         <source>Border</source>
         <translation>Border</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="573"/>
+        <location filename="../src/settingsdialog.cpp" line="574"/>
         <source>Folder padding</source>
         <translation>Folder padding</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="575"/>
+        <location filename="../src/settingsdialog.cpp" line="576"/>
         <source>Tile shape</source>
         <translation>Tile shape</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="577"/>
+        <location filename="../src/settingsdialog.cpp" line="578"/>
         <source>Biases tiles toward horizontal (←) or vertical (→). 0 produces the squarest tiles for the available area.</source>
         <translation>Biases tiles toward horizontal (←) or vertical (→). 0 produces the squarest tiles for the available area.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="580"/>
+        <location filename="../src/settingsdialog.cpp" line="581"/>
         <source>Tile appearance</source>
         <translation>Tile appearance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="581"/>
+        <location filename="../src/settingsdialog.cpp" line="582"/>
         <source>Set tile shape, borders, spacing, and fonts.</source>
         <translation>Set tile shape, borders, spacing, and fonts.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="585"/>
+        <location filename="../src/settingsdialog.cpp" line="586"/>
         <source>Zoom duration (ms)</source>
         <translation>Zoom duration (ms)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="587"/>
+        <location filename="../src/settingsdialog.cpp" line="588"/>
         <source>Length of the folder-to-folder zoom animation.</source>
         <translation>Length of the folder-to-folder zoom animation.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="588"/>
+        <location filename="../src/settingsdialog.cpp" line="589"/>
         <source>Camera duration (ms)</source>
         <translation>Camera duration (ms)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="590"/>
+        <location filename="../src/settingsdialog.cpp" line="591"/>
         <source>Length of wheel-zoom camera motion. Set to zero for instant movement.</source>
         <translation>Length of wheel-zoom camera motion. Set to zero for instant movement.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="591"/>
+        <location filename="../src/settingsdialog.cpp" line="592"/>
         <source>Wheel zoom step</source>
         <translation>Wheel zoom step</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="593"/>
+        <location filename="../src/settingsdialog.cpp" line="594"/>
         <source>Scale change applied for each wheel step. Higher values zoom faster.</source>
         <translation>Scale change applied for each wheel step. Higher values zoom faster.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="594"/>
+        <location filename="../src/settingsdialog.cpp" line="595"/>
         <source>Zoom optimisation</source>
         <translation>Zoom optimization</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="597"/>
+        <location filename="../src/settingsdialog.cpp" line="599"/>
         <source>Animation timing</source>
         <translation>Animation timing</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="598"/>
+        <location filename="../src/settingsdialog.cpp" line="600"/>
         <source>Set zoom and camera animation speed.</source>
         <translation>Set zoom and camera animation speed.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="604"/>
+        <location filename="../src/settingsdialog.cpp" line="606"/>
         <source>Tooltip appearance</source>
         <translation>Tooltip appearance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="702"/>
+        <location filename="../src/settingsdialog.cpp" line="704"/>
         <source>Style</source>
         <translation>Style</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="703"/>
+        <location filename="../src/settingsdialog.cpp" line="705"/>
         <source>Intensity %</source>
         <translation>Intensity %</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="749"/>
+        <location filename="../src/settingsdialog.cpp" line="751"/>
         <source>Depth reveal rate</source>
         <translation>Depth reveal rate</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="752"/>
+        <location filename="../src/settingsdialog.cpp" line="754"/>
         <source>How many extra depth levels become visible each time zoom doubles.</source>
         <translation>How many extra depth levels become visible each time zoom doubles.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="757"/>
+        <location filename="../src/settingsdialog.cpp" line="759"/>
         <source>Child tiles are fully visible once the folder reaches these dimensions.</source>
         <translation>Child tiles are fully visible once the folder reaches these dimensions.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="758"/>
+        <location filename="../src/settingsdialog.cpp" line="760"/>
         <source>Reveal fade distance</source>
         <translation>Reveal fade distance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="762"/>
+        <location filename="../src/settingsdialog.cpp" line="764"/>
         <source>How far below the full-reveal size children start fading in. For example, 20 means reveal begins 20 pixels earlier.</source>
         <translation>How far below the full-reveal size children start fading in. For example, 20 means reveal begins 20 pixels earlier.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="763"/>
+        <location filename="../src/settingsdialog.cpp" line="765"/>
         <source>Tiny tile size</source>
         <translation>Tiny tile size</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="765"/>
+        <location filename="../src/settingsdialog.cpp" line="767"/>
         <source>Small files at or above this size still render as tiny tiles instead of disappearing into the minimum paint cutoff.</source>
         <translation>Small files at or above this size still render as tiny tiles instead of disappearing into the minimum paint cutoff.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="768"/>
+        <location filename="../src/settingsdialog.cpp" line="770"/>
         <source>Tiles smaller than this in either dimension are skipped entirely.</source>
         <translation>Tiles smaller than this in either dimension are skipped entirely.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="803"/>
+        <location filename="../src/settingsdialog.cpp" line="805"/>
         <source>Use absolute paths such as /var/lib/docker or /mnt/archive. Matching is recursive, so descendants are excluded too. When scanning /, virtual system paths like /proc are already skipped automatically.</source>
         <translation>Use absolute paths such as /var/lib/docker or /mnt/archive. Matching is recursive, so descendants are excluded too. When scanning /, virtual system paths like /proc are already skipped automatically.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1172"/>
+        <location filename="../src/settingsdialog.cpp" line="1174"/>
         <source>Preview</source>
         <translation>Preview</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="618"/>
+        <location filename="../src/settingsdialog.cpp" line="620"/>
         <source>Adjust colours</source>
         <translation>Adjust colors</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="494"/>
+        <location filename="../src/settingsdialog.cpp" line="495"/>
         <source>/var/lib/docker</source>
         <translation>/var/lib/docker</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="619"/>
+        <location filename="../src/settingsdialog.cpp" line="621"/>
         <source>Manage themes and set treemap colours.</source>
         <translation>Manage themes and set treemap colors.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="639"/>
+        <location filename="../src/settingsdialog.cpp" line="641"/>
         <source>Editing theme</source>
         <translation>Editing theme</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="643"/>
+        <location filename="../src/settingsdialog.cpp" line="645"/>
         <source>Theme name</source>
         <translation>Theme name</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="647"/>
+        <location filename="../src/settingsdialog.cpp" line="649"/>
         <source>Automatic switching</source>
         <translation>Automatic switching</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="651"/>
+        <location filename="../src/settingsdialog.cpp" line="653"/>
         <source>Mode defaults</source>
         <translation>Mode defaults</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="653"/>
+        <location filename="../src/settingsdialog.cpp" line="655"/>
         <source>Light mode</source>
         <translation>Light mode</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="654"/>
+        <location filename="../src/settingsdialog.cpp" line="656"/>
         <source>Dark mode</source>
         <translation>Dark mode</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="657"/>
+        <location filename="../src/settingsdialog.cpp" line="659"/>
         <source>Saved themes</source>
         <translation>Saved themes</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="658"/>
+        <location filename="../src/settingsdialog.cpp" line="660"/>
         <source>Choose, rename, duplicate, and switch themes.</source>
         <translation>Choose, rename, duplicate, and switch themes.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="662"/>
+        <location filename="../src/settingsdialog.cpp" line="664"/>
         <source>Folder colour mode</source>
         <translation>Folder color mode</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="673"/>
+        <location filename="../src/settingsdialog.cpp" line="675"/>
         <source>Gradient preset</source>
         <translation>Gradient preset</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="678"/>
+        <location filename="../src/settingsdialog.cpp" line="680"/>
         <source>Folder base colour</source>
         <translation>Folder base color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="681"/>
-        <location filename="../src/settingsdialog.cpp" line="692"/>
+        <location filename="../src/settingsdialog.cpp" line="683"/>
+        <location filename="../src/settingsdialog.cpp" line="694"/>
         <source>Saturation %</source>
         <translation>Saturation %</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="682"/>
-        <location filename="../src/settingsdialog.cpp" line="693"/>
+        <location filename="../src/settingsdialog.cpp" line="684"/>
+        <location filename="../src/settingsdialog.cpp" line="695"/>
         <source>Brightness %</source>
         <translation>Brightness %</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="684"/>
+        <location filename="../src/settingsdialog.cpp" line="686"/>
         <source>Folder colour</source>
         <translation>Folder color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="686"/>
+        <location filename="../src/settingsdialog.cpp" line="688"/>
         <source>Mode</source>
         <translation>Mode</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="687"/>
+        <location filename="../src/settingsdialog.cpp" line="689"/>
         <source>Amount %</source>
         <translation>Amount %</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="688"/>
+        <location filename="../src/settingsdialog.cpp" line="690"/>
         <source>Choose whether deeper folders darken or lighten, and by how much per level.</source>
         <translation>Choose whether deeper folders darken or lighten, and by how much per level.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="689"/>
+        <location filename="../src/settingsdialog.cpp" line="691"/>
         <source>Folder depth change</source>
         <translation>Folder depth change</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="690"/>
+        <location filename="../src/settingsdialog.cpp" line="692"/>
         <source>File colour</source>
         <translation>File color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="695"/>
+        <location filename="../src/settingsdialog.cpp" line="697"/>
         <source>Unspecified types</source>
         <translation>Unspecified types</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="705"/>
+        <location filename="../src/settingsdialog.cpp" line="707"/>
         <source>Highlight</source>
         <translation>Highlight</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="697"/>
-        <location filename="../src/settingsdialog.cpp" line="707"/>
-        <location filename="../src/settingsdialog.cpp" line="1007"/>
+        <location filename="../src/settingsdialog.cpp" line="699"/>
+        <location filename="../src/settingsdialog.cpp" line="709"/>
+        <location filename="../src/settingsdialog.cpp" line="1009"/>
         <source>Colour</source>
         <translation>Color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="698"/>
-        <location filename="../src/settingsdialog.cpp" line="708"/>
+        <location filename="../src/settingsdialog.cpp" line="700"/>
+        <location filename="../src/settingsdialog.cpp" line="710"/>
         <source>Opacity %</source>
         <translation>Opacity %</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="710"/>
-        <location filename="../src/settingsdialog.cpp" line="821"/>
+        <location filename="../src/settingsdialog.cpp" line="712"/>
+        <location filename="../src/settingsdialog.cpp" line="823"/>
         <source>Free space</source>
         <translation>Free space</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="930"/>
+        <location filename="../src/settingsdialog.cpp" line="932"/>
         <source>Choose colour for unspecified types</source>
         <translation>Choose color for unspecified types</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1022"/>
+        <location filename="../src/settingsdialog.cpp" line="1024"/>
         <source>When disabled, use the &lt;b&gt;Unspecified types&lt;/b&gt; colour on the Colours page.</source>
         <translation>When disabled, use the &lt;b&gt;Unspecified types&lt;/b&gt; color on the Colors page.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="699"/>
+        <location filename="../src/settingsdialog.cpp" line="701"/>
         <source>Colour used for file types not matching any group (when random is off).</source>
         <translation>Color used for file types not matching any group (when random is off).</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="715"/>
+        <location filename="../src/settingsdialog.cpp" line="717"/>
         <source>Treemap colours</source>
         <translation>Treemap colors</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="716"/>
+        <location filename="../src/settingsdialog.cpp" line="718"/>
         <source>Set folder, file, border, highlight, and free-space colours.</source>
         <translation>Set folder, file, border, highlight, and free-space colors.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="729"/>
+        <location filename="../src/settingsdialog.cpp" line="731"/>
         <source>Adjust performance</source>
         <translation>Adjust performance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="730"/>
+        <location filename="../src/settingsdialog.cpp" line="732"/>
         <source>Control scan updates, visibility thresholds, and zoom limits.</source>
         <translation>Control scan updates, visibility thresholds, and zoom limits.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="735"/>
+        <location filename="../src/settingsdialog.cpp" line="737"/>
         <source>Scan updates</source>
         <translation>Scan updates</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="746"/>
+        <location filename="../src/settingsdialog.cpp" line="748"/>
         <source>Visible depth</source>
         <translation>Visible depth</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="748"/>
+        <location filename="../src/settingsdialog.cpp" line="750"/>
         <source>How many folder levels are shown before zoom starts revealing more.</source>
         <translation>How many folder levels are shown before zoom starts revealing more.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="755"/>
-        <location filename="../src/settingsdialog.cpp" line="760"/>
+        <location filename="../src/settingsdialog.cpp" line="757"/>
+        <location filename="../src/settingsdialog.cpp" line="762"/>
         <source>Width</source>
         <translation>Width</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="756"/>
-        <location filename="../src/settingsdialog.cpp" line="761"/>
+        <location filename="../src/settingsdialog.cpp" line="758"/>
+        <location filename="../src/settingsdialog.cpp" line="763"/>
         <source>Height</source>
         <translation>Height</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="753"/>
+        <location filename="../src/settingsdialog.cpp" line="755"/>
         <source>Fully reveal children</source>
         <translation>Fully reveal children</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="766"/>
+        <location filename="../src/settingsdialog.cpp" line="768"/>
         <source>Minimum size</source>
         <translation>Minimum size</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="770"/>
+        <location filename="../src/settingsdialog.cpp" line="772"/>
         <source>Child visibility</source>
         <translation>Child visibility</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="771"/>
+        <location filename="../src/settingsdialog.cpp" line="773"/>
         <source>Set when folder details and child tiles appear.</source>
         <translation>Set when folder details and child tiles appear.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="781"/>
+        <location filename="../src/settingsdialog.cpp" line="783"/>
         <source>Camera max scale</source>
         <translation>Camera max scale</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="783"/>
+        <location filename="../src/settingsdialog.cpp" line="785"/>
         <source>Maximum allowed camera zoom level.</source>
         <translation>Maximum allowed camera zoom level.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="785"/>
+        <location filename="../src/settingsdialog.cpp" line="787"/>
         <source>Navigation</source>
         <translation>Navigation</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="786"/>
+        <location filename="../src/settingsdialog.cpp" line="788"/>
         <source>Set the maximum camera zoom level.</source>
         <translation>Set the maximum camera zoom level.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="794"/>
+        <location filename="../src/settingsdialog.cpp" line="796"/>
         <source>Manage exclusions</source>
         <translation>Manage exclusions</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="795"/>
+        <location filename="../src/settingsdialog.cpp" line="797"/>
         <source>Choose which paths to skip during scans.</source>
         <translation>Choose which paths to skip during scans.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="797"/>
+        <location filename="../src/settingsdialog.cpp" line="799"/>
         <source>Excluded paths</source>
         <translation>Excluded paths</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="812"/>
-        <location filename="../src/settingsdialog.cpp" line="992"/>
+        <location filename="../src/settingsdialog.cpp" line="814"/>
+        <location filename="../src/settingsdialog.cpp" line="994"/>
         <source>Add</source>
         <translation>Add</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="817"/>
-        <location filename="../src/settingsdialog.cpp" line="993"/>
+        <location filename="../src/settingsdialog.cpp" line="819"/>
+        <location filename="../src/settingsdialog.cpp" line="995"/>
         <source>Remove selected</source>
         <translation>Remove selected</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="825"/>
+        <location filename="../src/settingsdialog.cpp" line="827"/>
         <source>Hide free space for network filesystems (NFS, SMB, etc.)</source>
         <translation>Hide free space for network filesystems (NFS, SMB, etc.)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="890"/>
+        <location filename="../src/settingsdialog.cpp" line="892"/>
         <source>Choose folder base colour</source>
         <translation>Choose folder base color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="909"/>
+        <location filename="../src/settingsdialog.cpp" line="911"/>
         <source>Choose highlight colour</source>
         <translation>Choose highlight color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="919"/>
+        <location filename="../src/settingsdialog.cpp" line="921"/>
         <source>Choose free space colour</source>
         <translation>Choose free space color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="985"/>
+        <location filename="../src/settingsdialog.cpp" line="987"/>
         <source>File type groups</source>
         <translation>File type groups</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1000"/>
+        <location filename="../src/settingsdialog.cpp" line="1002"/>
         <source>Edit group</source>
         <translation>Edit group</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1006"/>
+        <location filename="../src/settingsdialog.cpp" line="1008"/>
         <source>Name</source>
         <translation>Name</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1009"/>
+        <location filename="../src/settingsdialog.cpp" line="1011"/>
         <source>Extensions</source>
         <translation>Extensions</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1011"/>
+        <location filename="../src/settingsdialog.cpp" line="1013"/>
         <source>One per line (or comma-separated)</source>
         <translation>One per line (or comma-separated)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1016"/>
+        <location filename="../src/settingsdialog.cpp" line="1018"/>
         <source>Additional options</source>
         <translation>Additional options</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1032"/>
+        <location filename="../src/settingsdialog.cpp" line="1034"/>
         <source>File type colours</source>
         <translation>File type colors</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1033"/>
+        <location filename="../src/settingsdialog.cpp" line="1035"/>
         <source>Assign exact colours to groups of file extensions.</source>
         <translation>Assign exact colors to groups of file extensions.</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1054"/>
+        <location filename="../src/settingsdialog.cpp" line="1056"/>
         <source>Choose colour</source>
         <translation>Choose color</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1115"/>
+        <location filename="../src/settingsdialog.cpp" line="1117"/>
         <source>Appearance</source>
         <translation>Appearance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1121"/>
+        <location filename="../src/settingsdialog.cpp" line="1123"/>
         <source>Colours</source>
         <translation>Colors</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1127"/>
+        <location filename="../src/settingsdialog.cpp" line="1129"/>
         <source>File Types</source>
         <translation>File Types</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1133"/>
+        <location filename="../src/settingsdialog.cpp" line="1135"/>
         <source>Performance</source>
         <translation>Performance</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1139"/>
+        <location filename="../src/settingsdialog.cpp" line="1141"/>
         <source>Exclusions</source>
         <translation>Exclusions</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1341"/>
+        <location filename="../src/settingsdialog.cpp" line="1343"/>
         <source>Custom theme</source>
         <translation>Custom theme</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1365"/>
+        <location filename="../src/settingsdialog.cpp" line="1367"/>
         <source>%1 Copy</source>
         <translation>%1 Copy</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1460"/>
-        <location filename="../src/settingsdialog.cpp" line="1913"/>
+        <location filename="../src/settingsdialog.cpp" line="1463"/>
+        <location filename="../src/settingsdialog.cpp" line="1917"/>
         <source>%1  (%2 ext)</source>
         <translation>%1  (%2 ext)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1927"/>
+        <location filename="../src/settingsdialog.cpp" line="1931"/>
         <source>New group  (0 ext)</source>
         <translation>New group  (0 ext)</translation>
     </message>
     <message>
-        <location filename="../src/settingsdialog.cpp" line="1930"/>
+        <location filename="../src/settingsdialog.cpp" line="1934"/>
         <source>New group</source>
         <translation>New group</translation>
     </message>
@@ -1515,32 +1520,32 @@ gif</translation>
 <context>
     <name>TreemapWidget</name>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="1686"/>
+        <location filename="../src/treemapwidget.cpp" line="1695"/>
         <source>Size: %1</source>
         <translation>Size: %1</translation>
     </message>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="1689"/>
+        <location filename="../src/treemapwidget.cpp" line="1698"/>
         <source>Parent %1 · Root %2</source>
         <translation>Parent %1 · Root %2</translation>
     </message>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="4306"/>
+        <location filename="../src/treemapwidget.cpp" line="4318"/>
         <source>Scanning %1</source>
         <translation>Scanning %1</translation>
     </message>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="4307"/>
+        <location filename="../src/treemapwidget.cpp" line="4319"/>
         <source>Open a directory to begin</source>
         <translation>Open a directory to begin</translation>
     </message>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="1888"/>
+        <location filename="../src/treemapwidget.cpp" line="1899"/>
         <source>Folder</source>
         <translation>Folder</translation>
     </message>
     <message>
-        <location filename="../src/treemapwidget.cpp" line="1888"/>
+        <location filename="../src/treemapwidget.cpp" line="1899"/>
         <source>File</source>
         <translation>File</translation>
     </message>
