@@ -194,8 +194,6 @@ private:
     qreal childRevealOpacityForLayout(const FileNode* node, const QRectF& layoutArea,
                                       int childDepth) const;
     qreal folderDetailOpacityForNode(const FileNode* node, const QRectF& bounds) const;
-    bool suppressHoverForTinyTranslucentLeaf(const FileNode* node, const QRectF& rect) const;
-    QRect hoverDirtyRectForNode(const FileNode* node, const QRectF& rect) const;
     qreal pixelScale() const;
     QRectF sceneToViewRectF(const QRectF& rect) const;
     QPointF maxCameraOriginForScale(qreal scale) const;

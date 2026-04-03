@@ -1835,25 +1835,20 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
         hitRect = QRectF();
     }
 
-    FileNode* hoverHit = hit;
-    QRectF hoverRect = hitRect;
-    if (suppressHoverForTinyTranslucentLeaf(hoverHit, hoverRect)) {
-        hoverHit = nullptr;
-        hoverRect = QRectF();
-    }
-
-    const bool hoverChanged = (hoverHit != m_hovered);
-    const bool hoverRectChanged = (!hoverChanged && hoverRect != m_hoveredRect);
+    const bool hoverChanged = (hit != m_hovered);
+    const bool hoverRectChanged = (!hoverChanged && hitRect != m_hoveredRect);
     if (hoverChanged || hoverRectChanged) {
-        QRect dirty = hoverDirtyRectForNode(m_hovered, m_hoveredRect);
-        dirty = dirty.united(hoverDirtyRectForNode(hoverHit, hoverRect));
+        QRect dirty = expandedDirtyRect(m_hoveredRect.toAlignedRect(), viewport()->rect());
+        if (!hitRect.isEmpty()) {
+            dirty = dirty.united(expandedDirtyRect(hitRect.toAlignedRect(), viewport()->rect()));
+        }
         m_previousHovered = nullptr;
         m_previousHoveredRect = QRectF();
-        m_hovered = hoverHit;
-        m_hoveredRect = hoverRect;
+        m_hovered = hit;
+        m_hoveredRect = hitRect;
         if (hoverChanged) {
             m_hoveredTooltip.clear();
-            m_hoverBlend = hoverHit ? 1.0 : 0.0;
+            m_hoverBlend = hit ? 1.0 : 0.0;
             m_hoverAnimation.stop();
         }
         viewport()->update(dirty);
@@ -3346,22 +3341,6 @@ qreal TreemapWidget::folderDetailOpacityForNode(const FileNode* node, const QRec
     return std::min(detailFadeW, detailFadeH);
 }
 
-bool TreemapWidget::suppressHoverForTinyTranslucentLeaf(const FileNode* node, const QRectF& rect) const
-{
-    return node
-        && !node->isDirectory
-        && QColor::fromRgba(node->color).alphaF() < 1.0
-        && tileRevealOpacityForNode(node, rect) <= 0.0;
-}
-
-QRect TreemapWidget::hoverDirtyRectForNode(const FileNode* node, const QRectF& rect) const
-{
-    if (rect.isEmpty()) {
-        return QRect();
-    }
-    const int padding = (node && !node->isDirectory) ? 0 : 4;
-    return expandedDirtyRect(rect.toAlignedRect(), viewport()->rect(), padding);
-}
 
 QPointF TreemapWidget::maxCameraOriginForScale(qreal scale) const
 {
@@ -3845,11 +3824,9 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                 // blends calculated at the top of paintNode to ensure children correctly
                 // inherit the highlight from a hovered parent.
                 const qreal childSubtreeHighlightStrength = std::min(childSubtreeHoverBlend + childSubtreePrevHoverBlend, 1.0) * highlightOpacity;
-                const bool suppressTinyLeafHover =
-                    suppressHoverForTinyTranslucentLeaf(child, childRect);
                 const qreal childNodeHoverStrength = std::max(
-                    (child == m_hovered && !suppressTinyLeafHover)         ? m_hoverBlend         : 0.0,
-                    (child == m_previousHovered && !suppressTinyLeafHover) ? (1.0 - m_hoverBlend) : 0.0);
+                    (child == m_hovered)         ? m_hoverBlend         : 0.0,
+                    (child == m_previousHovered) ? (1.0 - m_hoverBlend) : 0.0);
                 const qreal childBgHighlightStrength = std::max(
                     childNodeHoverStrength * highlightOpacity, childSubtreeHighlightStrength);
 
@@ -3869,9 +3846,12 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
 
                 const QColor fillColor = childBgHighlightStrength > 0.0
                     ? blendColors(baseFill, hoverBase, childBgHighlightStrength) : baseFill;
-                const QColor effectiveFillColor = (!child->isDirectory && fillColor.alphaF() < 1.0)
-                    ? opaqueCompositeColor(childBackgroundColor, fillColor)
-                    : fillColor;
+                // For file tiles, always pre-composite the fill colour against the
+                // panel background using gamma-correct blending.  opaqueCompositeColor
+                // is a no-op for fully-opaque colours, so this handles both cases.
+                const QColor effectiveFillColor = child->isDirectory
+                    ? fillColor
+                    : opaqueCompositeColor(childBackgroundColor, fillColor);
 
                 // Draw background at the calculated total opacity for this child
                 paintTinyNodeFill(p, childRect, effectiveFillColor, m_framePixelScale,
@@ -3945,13 +3925,17 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
         if (directoryState.showChrome
                 && directoryState.childPaintRect.width() > 1.0
                 && directoryState.childPaintRect.height() > 1.0) {
-            if (applyOwnReveal) {
-                p.save();
-                p.setClipRect(directoryState.contentFillClipRect, Qt::IntersectClip);
-                p.setOpacity(baseOpacity * tileRevealOpacity);
-                p.fillRect(directoryState.childPaintRect, contentAreaColor);
-                p.restore();
-            }
+            // Always fill the content area with the panel colour, even when
+            // applyOwnReveal is false.  childBackgroundColor is contentAreaColor,
+            // so opaqueCompositeColor() pre-composites file tiles against the
+            // panel colour; the background must actually be that colour or
+            // semi-transparent files will look wrong (too dark, or brighter on
+            // hover when the partial-repaint chromeOutsideClip path corrects it).
+            p.save();
+            p.setClipRect(directoryState.contentFillClipRect, Qt::IntersectClip);
+            p.setOpacity(baseOpacity * tileRevealOpacity);
+            p.fillRect(directoryState.childPaintRect, contentAreaColor);
+            p.restore();
         }
 
         if (directoryState.showChrome) {
