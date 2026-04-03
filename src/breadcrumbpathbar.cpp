@@ -457,9 +457,16 @@ void BreadcrumbPathBar::exitEditMode()
 void BreadcrumbPathBar::activateCurrentEditorPath()
 {
     const QString enteredPath = m_lineEdit->text().trimmed();
-    if (!enteredPath.isEmpty()) {
-        emit pathActivated(enteredPath, false);
+    if (enteredPath.isEmpty()) {
+        return;
     }
+
+    const QFileInfo targetInfo(QDir(enteredPath).absolutePath());
+    if (!targetInfo.exists() || !targetInfo.isDir()) {
+        return;
+    }
+
+    emit pathActivated(targetInfo.absoluteFilePath(), false);
 }
 
 QString BreadcrumbPathBar::normalizedPath(const QString& path)

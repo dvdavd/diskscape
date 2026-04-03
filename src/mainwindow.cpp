@@ -1559,6 +1559,14 @@ void MainWindow::activatePath(const QString& path, bool forceScan)
     }
 
     const QString absolutePath = QDir(enteredPath).absolutePath();
+    const QFileInfo targetInfo(absolutePath);
+    if (!targetInfo.exists() || !targetInfo.isDir()) {
+        statusBar()->showMessage(
+            tr("Directory does not exist: %1").arg(QDir::toNativeSeparators(absolutePath)),
+            4000);
+        return;
+    }
+
     if (!forceScan && pathIsWithinRoot(absolutePath, m_currentPath) && m_scanResult.root) {
         if (FileNode* node = findNodeByPath(m_scanResult.root, absolutePath)) {
             navigateTo(node, true);

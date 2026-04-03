@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(diskscape VERSION 0.9.17 LANGUAGES CXX)
+project(diskscape VERSION 0.9.18 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -232,6 +232,14 @@ diskscape_add_test(test_refresh
     tests/test_refresh.cpp
     src/scanner.h
     ${SCANNER_BACKEND_SRC}
+    ${DISKSCAPE_WIDGET_SRC}
+)
+
+diskscape_add_test(test_breadcrumbpathbar
+    tests/test_breadcrumbpathbar.cpp
+    src/breadcrumbpathbar.h
+    src/breadcrumbpathbar.cpp
+    src/iconutils.h
     ${DISKSCAPE_WIDGET_SRC}
 )
 
