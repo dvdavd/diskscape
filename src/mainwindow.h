@@ -114,9 +114,12 @@ private:
     void setRefreshBusy(bool busy);
     void setSearchBusy(bool busy);
     void applySearchFromToolbar();
+    void onThemeSettled();
     void updatePathBarChrome();
     void updateLandingPageChrome();
-    void updateToolbarIcons();
+    void updateToolbarChrome();
+    void updateSizeFilterChrome();
+    void updateToolbarIcons(const QColor& iconColor = {});
     void updateToolbarResponsiveLayout();
     void updateTypeLegendPanel();
     void revealPathInFileManager(const QString& path, bool isDirectory);
@@ -220,6 +223,7 @@ private:
     QString m_pendingScanPath;
     QSet<QString> m_dirtyPaths;
     QTimer* m_searchDebounceTimer = nullptr;
+    QTimer* m_themeSettleTimer = nullptr;
     QComboBox* m_sizeFilterCombo = nullptr;
     QString m_activeRefreshPath;
     ViewStatePaths m_preRefreshViewPaths;

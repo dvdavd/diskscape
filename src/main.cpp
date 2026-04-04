@@ -28,8 +28,8 @@ int main(int argc, char* argv[])
         app.installTranslator(&appTranslator);
 
 #ifdef Q_OS_WIN
-    if (QStyleFactory::keys().contains(QStringLiteral("windowsvista"), Qt::CaseInsensitive)) {
-        app.setStyle(QStyleFactory::create(QStringLiteral("windowsvista")));
+    if (QStyleFactory::keys().contains(QStringLiteral("fusion"), Qt::CaseInsensitive)) {
+        app.setStyle(QStyleFactory::create(QStringLiteral("fusion")));
     }
 #endif
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Diskscape"));

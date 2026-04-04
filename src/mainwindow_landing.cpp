@@ -415,6 +415,10 @@ void MainWindow::updatePathBarChrome()
         return;
     }
 
+    if (!m_searchEdit->styleSheet().isEmpty()) {
+        m_searchEdit->setStyleSheet(QString());
+    }
+
     m_searchEdit->ensurePolished();
     int controlHeight = m_searchEdit->sizeHint().height();
     if (m_sizeFilterCombo) {
@@ -507,76 +511,56 @@ void MainWindow::updateLandingPageChrome()
     }
 }
 
-void MainWindow::updateToolbarIcons()
+void MainWindow::updateToolbarIcons(const QColor& iconColor)
 {
-    if (m_scanCustomAction) {
-        m_scanCustomAction->setIcon(toolbarIcon({"folder-open", "document-open"},
-            QStringLiteral(":/assets/tabler-icons/folder-open.svg")));
-    }
-    if (m_homeAction) {
-        m_homeAction->setIcon(toolbarIcon({"user-home"},
-            QStringLiteral(":/assets/tabler-icons/home.svg")));
-    }
-    if (m_backAction) {
-        m_backAction->setIcon(toolbarIcon({"go-previous", "arrow-left"},
-            QStringLiteral(":/assets/tabler-icons/chevron-left.svg")));
-    }
-    if (m_upAction) {
-        m_upAction->setIcon(toolbarIcon({"go-up", "arrow-up"},
-            QStringLiteral(":/assets/tabler-icons/chevron-up.svg")));
-    }
+    const QColor color = iconColor.isValid()
+        ? iconColor
+        : (qApp ? qApp->palette().color(QPalette::ButtonText) : QColor(QStringLiteral("#444444")));
+    auto icon = [&](const QString& resource) {
+        return makeRecoloredSvgIcon(resource, color);
+    };
+
+    if (m_scanCustomAction)
+        m_scanCustomAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/folder-open.svg")));
+    if (m_homeAction)
+        m_homeAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/home.svg")));
+    if (m_backAction)
+        m_backAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/chevron-left.svg")));
+    if (m_upAction)
+        m_upAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/chevron-up.svg")));
     if (m_refreshAction) {
         const bool showCancel = m_scanInProgress
             || m_incrementalRefreshInProgress
             || m_postProcessInProgress;
         m_refreshAction->setIcon(showCancel
-            ? toolbarIcon({"process-stop", "dialog-cancel"},
-                QStringLiteral(":/assets/tabler-icons/refresh-off.svg"))
-            : toolbarIcon({"view-refresh", "refresh"},
-                QStringLiteral(":/assets/tabler-icons/refresh.svg")));
+            ? icon(QStringLiteral(":/assets/tabler-icons/refresh-off.svg"))
+            : icon(QStringLiteral(":/assets/tabler-icons/refresh.svg")));
     }
-    m_permissionWarningIcon = toolbarIcon({"dialog-warning"},
-        QStringLiteral(":/assets/tabler-icons/alert-triangle.svg"));
-    if (m_permissionWarningAction) {
+    m_permissionWarningIcon = icon(QStringLiteral(":/assets/tabler-icons/alert-triangle.svg"));
+    if (m_permissionWarningAction)
         m_permissionWarningAction->setIcon(m_permissionWarningIcon);
-    }
-    if (m_warningsMenuAction) {
+    if (m_warningsMenuAction)
         m_warningsMenuAction->setIcon(m_permissionWarningIcon);
-    }
 #ifndef Q_OS_WIN
-    if (m_limitToSameFilesystemAction) {
-        m_limitToSameFilesystemAction->setIcon(toolbarIcon({"freeze-row-column"},
-            QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")));
-    }
+    if (m_limitToSameFilesystemAction)
+        m_limitToSameFilesystemAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")));
 #endif
-    if (m_toggleDirectoryTreeAction) {
-        m_toggleDirectoryTreeAction->setIcon(toolbarIcon({"folder"},
-            QStringLiteral(":/assets/tabler-icons/folders.svg")));
-    }
-    if (m_zoomInAction) {
-        m_zoomInAction->setIcon(toolbarIcon({"zoom-in"},
-            QStringLiteral(":/assets/tabler-icons/zoom-in.svg")));
-    }
-    if (m_zoomOutAction) {
-        m_zoomOutAction->setIcon(toolbarIcon({"zoom-out"},
-            QStringLiteral(":/assets/tabler-icons/zoom-out.svg")));
-    }
-    if (m_resetZoomAction) {
-        m_resetZoomAction->setIcon(toolbarIcon({"zoom-original", "zoom-fit-best"},
-            QStringLiteral(":/assets/tabler-icons/zoom-reset.svg")));
-    }
-    if (m_toggleTypeLegendAction) {
-        m_toggleTypeLegendAction->setIcon(toolbarIcon({"view-list-details", "view-list"},
-            QStringLiteral(":/assets/tabler-icons/list-details.svg")));
-    }
-    if (m_settingsAction) {
-        m_settingsAction->setIcon(toolbarIcon({"settings-configure", "preferences-system"},
-            QStringLiteral(":/assets/tabler-icons/settings.svg")));
-    }
-    if (m_menuButton) {
-        m_menuButton->setIcon(toolbarIcon({"application-menu", "open-menu"},
-            QStringLiteral(":/assets/tabler-icons/menu-2.svg")));
-    }
+    if (m_toggleFreeSpaceAction)
+        m_toggleFreeSpaceAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/chart-donut.svg")));
+    if (m_toggleDirectoryTreeAction)
+        m_toggleDirectoryTreeAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/folders.svg")));
+    if (m_zoomInAction)
+        m_zoomInAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/zoom-in.svg")));
+    if (m_zoomOutAction)
+        m_zoomOutAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/zoom-out.svg")));
+    if (m_resetZoomAction)
+        m_resetZoomAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/zoom-reset.svg")));
+    if (m_toggleTypeLegendAction)
+        m_toggleTypeLegendAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/list-details.svg")));
+    if (m_settingsAction)
+        m_settingsAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/settings.svg")));
+    if (m_menuButton)
+        m_menuButton->setIcon(icon(QStringLiteral(":/assets/tabler-icons/menu-2.svg")));
 }
 
 

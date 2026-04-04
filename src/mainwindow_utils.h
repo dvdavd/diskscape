@@ -50,7 +50,6 @@ inline constexpr int kLandingTileSpacing = 10;
 int landingTileWidth();
 QString landingLocationStyleSheet();
 QString normalizedFilesystemPath(const QString& path);
-bool isRunningInFlatpakSandbox();
 QList<BreadcrumbPathSegment> breadcrumbPathSegments(const QString& path);
 bool systemUsesDarkColorScheme();
 QSettings appSettings();

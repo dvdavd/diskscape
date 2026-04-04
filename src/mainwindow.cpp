@@ -50,6 +50,7 @@
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QStyledItemDelegate>
+#include <QStyleHints>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -512,19 +513,17 @@ void MainWindow::setupToolbar(QSettings& store)
     }
 
 #ifndef Q_OS_WIN
-    if (!isRunningInFlatpakSandbox()) {
-        m_limitToSameFilesystemAction = new QAction(
-            toolbarIcon({"freeze-row-column"},
-                QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")),
-            tr("Single Filesystem"),
-            this);
-        m_limitToSameFilesystemAction->setCheckable(true);
-        m_limitToSameFilesystemAction->setChecked(m_settings.limitToSameFilesystem);
-        m_limitToSameFilesystemAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
-        setActionTooltip(m_limitToSameFilesystemAction,
-            tr("Stay on the current filesystem while scanning (refresh required)"));
-        connect(m_limitToSameFilesystemAction, &QAction::toggled, this, &MainWindow::onLimitToSameFilesystemToggled);
-    }
+    m_limitToSameFilesystemAction = new QAction(
+        toolbarIcon({"freeze-row-column"},
+            QStringLiteral(":/assets/tabler-icons/freeze-row-column.svg")),
+        tr("Single Filesystem"),
+        this);
+    m_limitToSameFilesystemAction->setCheckable(true);
+    m_limitToSameFilesystemAction->setChecked(m_settings.limitToSameFilesystem);
+    m_limitToSameFilesystemAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
+    setActionTooltip(m_limitToSameFilesystemAction,
+        tr("Stay on the current filesystem while scanning (refresh required)"));
+    connect(m_limitToSameFilesystemAction, &QAction::toggled, this, &MainWindow::onLimitToSameFilesystemToggled);
 #endif
 
     m_toolbar->addSeparator();
@@ -751,6 +750,7 @@ void MainWindow::setupToolbar(QSettings& store)
     m_sizeFilterCombo->addItem(tr("\u2265 1 TB"),     QVariantList{1LL<<40, 0LL});
     connect(m_sizeFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::applySearchFromToolbar);
+    updateSizeFilterChrome();
     m_toolbar->addWidget(m_sizeFilterCombo);
 
     auto* menuSpacer = new QWidget(this);
@@ -843,6 +843,7 @@ void MainWindow::setupToolbar(QSettings& store)
         }
     }
 
+    updateToolbarChrome();
     updateToolbarResponsiveLayout();
 
 #ifdef Q_OS_MACOS
@@ -1245,6 +1246,12 @@ void MainWindow::setupBackend()
     connect(m_searchDebounceTimer, &QTimer::timeout,
             this, &MainWindow::applySearchFromToolbar);
 
+    m_themeSettleTimer = new QTimer(this);
+    m_themeSettleTimer->setSingleShot(true);
+    m_themeSettleTimer->setInterval(0);
+    connect(m_themeSettleTimer, &QTimer::timeout,
+            this, &MainWindow::onThemeSettled);
+
     m_watchController = new FilesystemWatchController(this);
     connect(m_watchController, &FilesystemWatchController::refreshRequested,
             this, &MainWindow::launchIncrementalRefresh);
@@ -1284,10 +1291,32 @@ void MainWindow::openInitialPath(const QString& path)
     activatePath(path, false);
 }
 
+void MainWindow::updateToolbarChrome()
+{
+    if (!m_toolbar) {
+        return;
+    }
+
+    m_toolbar->setAutoFillBackground(false);
+    m_toolbar->setPalette(QPalette());
+}
+
+void MainWindow::updateSizeFilterChrome()
+{
+    if (!m_sizeFilterCombo) {
+        return;
+    }
+
+    const QPalette palette = qApp ? qApp->palette() : QApplication::palette();
+    m_sizeFilterCombo->setPalette(palette);
+    if (QAbstractItemView* popupView = m_sizeFilterCombo->view()) {
+        popupView->setPalette(palette);
+    }
+    m_sizeFilterCombo->setStyleSheet(QString());
+}
+
 void MainWindow::changeEvent(QEvent* event)
 {
-    QMainWindow::changeEvent(event);
-
     switch (event->type()) {
     case QEvent::PaletteChange:
     case QEvent::ApplicationPaletteChange:
@@ -1299,47 +1328,78 @@ void MainWindow::changeEvent(QEvent* event)
     case QEvent::DevicePixelRatioChange:
 #endif
     case QEvent::ScreenChangeInternal: {
+        QMainWindow::changeEvent(event);
+
         const bool darkMode = systemUsesDarkColorScheme();
         if (qApp) {
             syncApplicationPaletteToColorScheme(*qApp, darkMode);
             applyMenuFontPolicy(*qApp);
         }
-        syncColorThemeWithSystem(darkMode, true);
+        {
+            const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
+            const bool chromeDark = widgetChromeUsesDarkColorScheme();
+            const bool trustChrome = scheme == Qt::ColorScheme::Unknown || chromeDark != darkMode;
+            const bool treemapDark = trustChrome ? chromeDark : darkMode;
+            syncColorThemeWithSystem(treemapDark, true);
+        }
         updatePathBarChrome();
         updateLandingPageChrome();
+        updateToolbarChrome();
+        updateSizeFilterChrome();
         clearIconCaches();
         updateToolbarIcons();
-        QTimer::singleShot(0, this, [this]() {
-            if (!m_toolbar) {
-                return;
-            }
-            m_toolbar->style()->unpolish(m_toolbar);
-            m_toolbar->style()->polish(m_toolbar);
-            const auto toolbarButtons = m_toolbar->findChildren<QToolButton*>();
-            for (QToolButton* button : toolbarButtons) {
-                button->style()->unpolish(button);
-                button->style()->polish(button);
-                button->updateGeometry();
-            }
-            if (auto* layout = m_toolbar->layout()) {
-                layout->invalidate();
-                layout->activate();
-            }
-            m_toolbar->updateGeometry();
-            updateToolbarResponsiveLayout();
-        });
-        if (m_directoryTree) {
-            for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i) {
-                refreshDirectoryTreeIcons(m_directoryTree->topLevelItem(i));
-            }
-            m_directoryTree->viewport()->update();
-        }
-        updateTypeLegendPanel();
+        if (m_themeSettleTimer)
+            m_themeSettleTimer->start();
         break;
     }
     default:
+        QMainWindow::changeEvent(event);
         break;
     }
+}
+
+void MainWindow::onThemeSettled()
+{
+    if (m_toolbar) {
+        updateToolbarChrome();
+        m_toolbar->style()->unpolish(m_toolbar);
+        m_toolbar->style()->polish(m_toolbar);
+        const auto toolbarButtons = m_toolbar->findChildren<QToolButton*>();
+        for (QToolButton* button : toolbarButtons) {
+            button->style()->unpolish(button);
+            button->style()->polish(button);
+            button->updateGeometry();
+        }
+        if (auto* layout = m_toolbar->layout()) {
+            layout->invalidate();
+            layout->activate();
+        }
+        m_toolbar->updateGeometry();
+        updateToolbarResponsiveLayout();
+    }
+
+    if (m_sizeFilterCombo) {
+        const QPalette palette = qApp ? qApp->palette() : QApplication::palette();
+        m_sizeFilterCombo->setPalette(palette);
+        updateSizeFilterChrome();
+        m_sizeFilterCombo->style()->unpolish(m_sizeFilterCombo);
+        m_sizeFilterCombo->style()->polish(m_sizeFilterCombo);
+        if (QAbstractItemView* popupView = m_sizeFilterCombo->view()) {
+            popupView->setPalette(palette);
+            popupView->style()->unpolish(popupView);
+            popupView->style()->polish(popupView);
+            popupView->viewport()->update();
+        }
+        m_sizeFilterCombo->updateGeometry();
+        m_sizeFilterCombo->update();
+    }
+
+    if (m_directoryTree) {
+        for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i)
+            refreshDirectoryTreeIcons(m_directoryTree->topLevelItem(i));
+        m_directoryTree->viewport()->update();
+    }
+    updateTypeLegendPanel();
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event)
