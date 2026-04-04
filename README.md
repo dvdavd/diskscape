@@ -70,6 +70,7 @@ The main app target is produced as `diskscape`:
 
 ```bash
 ./build/diskscape
+./build/Diskscape   # (macOS)
 ```
 
 macOS and Windows builds are unsupported and not optimised yet but do work.

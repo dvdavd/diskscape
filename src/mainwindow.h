@@ -117,7 +117,6 @@ private:
     void updatePathBarChrome();
     void updateLandingPageChrome();
     void updateToolbarIcons();
-    void updateToolbarChrome();
     void updateToolbarResponsiveLayout();
     void updateTypeLegendPanel();
     void revealPathInFileManager(const QString& path, bool isDirectory);

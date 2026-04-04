@@ -37,6 +37,7 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
 #include <QPainter>
@@ -424,6 +425,9 @@ void MainWindow::setupToolbar(QSettings& store)
     m_toolbar->setMovable(false);
     m_toolbar->setFocusPolicy(Qt::NoFocus);
     m_toolbar->setIconSize(QSize(24, 24));
+#ifdef Q_OS_MACOS
+    setUnifiedTitleAndToolBarOnMac(true);
+#endif
 
     const auto setActionTooltip = [](QAction* action, const QString& text) {
         if (action) {
@@ -785,6 +789,7 @@ void MainWindow::setupToolbar(QSettings& store)
     toolbarMenu->addAction(m_aboutAppAction);
     toolbarMenu->addAction(m_aboutQtAction);
 
+#ifndef Q_OS_MACOS
     m_menuButton = new QToolButton(this);
     m_menuButton->setAutoRaise(true);
     m_menuButton->setPopupMode(QToolButton::InstantPopup);
@@ -801,6 +806,7 @@ void MainWindow::setupToolbar(QSettings& store)
     ));
     m_menuButton->setMenu(toolbarMenu);
     m_toolbar->addWidget(m_menuButton);
+#endif
 
     connect(m_permissionWarningAction, &QAction::toggled, this, [this](bool checked) {
         if (!m_warningsMenuAction || m_warningsMenuAction->isChecked() == checked) {
@@ -838,7 +844,43 @@ void MainWindow::setupToolbar(QSettings& store)
     }
 
     updateToolbarResponsiveLayout();
-    updateToolbarChrome();
+
+#ifdef Q_OS_MACOS
+    // On macOS, the native menu bar replaces the hamburger button
+    m_aboutAppAction->setMenuRole(QAction::AboutRole);
+    m_aboutQtAction->setMenuRole(QAction::AboutQtRole);
+    m_settingsAction->setMenuRole(QAction::PreferencesRole);
+
+    auto* mb = menuBar();
+
+    auto* macFileMenu = mb->addMenu(tr("File"));
+    macFileMenu->addAction(m_scanCustomAction);
+    macFileMenu->addAction(m_homeAction);
+    macFileMenu->addSeparator();
+    macFileMenu->addAction(m_settingsAction);
+
+    auto* macNavigateMenu = mb->addMenu(tr("Navigate"));
+    macNavigateMenu->addAction(m_backAction);
+    macNavigateMenu->addAction(m_upAction);
+    macNavigateMenu->addAction(m_refreshAction);
+
+    auto* macViewMenu = mb->addMenu(tr("View"));
+    macViewMenu->addAction(m_zoomInAction);
+    macViewMenu->addAction(m_zoomOutAction);
+    macViewMenu->addAction(m_resetZoomAction);
+    macViewMenu->addSeparator();
+    if (m_limitToSameFilesystemAction) {
+        macViewMenu->addAction(m_limitToSameFilesystemAction);
+    }
+    macViewMenu->addAction(m_toggleFreeSpaceAction);
+    macViewMenu->addAction(m_toggleDirectoryTreeAction);
+    macViewMenu->addAction(m_toggleTypeLegendAction);
+    macViewMenu->addAction(m_permissionWarningAction);
+
+    auto* macHelpMenu = mb->addMenu(tr("Help"));
+    macHelpMenu->addAction(m_aboutAppAction);
+    macHelpMenu->addAction(m_aboutQtAction);
+#endif
 }
 
 void MainWindow::setupCentralWidget(QSettings& store)
@@ -1271,7 +1313,6 @@ void MainWindow::changeEvent(QEvent* event)
             if (!m_toolbar) {
                 return;
             }
-            updateToolbarChrome();
             m_toolbar->style()->unpolish(m_toolbar);
             m_toolbar->style()->polish(m_toolbar);
             const auto toolbarButtons = m_toolbar->findChildren<QToolButton*>();

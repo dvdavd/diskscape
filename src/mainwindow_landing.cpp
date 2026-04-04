@@ -579,25 +579,6 @@ void MainWindow::updateToolbarIcons()
     }
 }
 
-void MainWindow::updateToolbarChrome()
-{
-#ifdef Q_OS_MAC
-    if (!m_toolbar) {
-        return;
-    }
-    if (widgetChromeUsesDarkColorScheme()) {
-        m_toolbar->setStyleSheet({});
-        return;
-    }
-    const QString borderCss = landingLocationBorderColor().name(QColor::HexArgb);
-    m_toolbar->setStyleSheet(QStringLiteral(
-        "QToolBar {"
-        "  background: palette(window);"
-        "  border: none;"
-        "  border-bottom: 1px solid %1;"
-        "}").arg(borderCss));
-#endif
-}
 
 void MainWindow::updateTypeLegendPanel()
 {

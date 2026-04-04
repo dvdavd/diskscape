@@ -79,6 +79,10 @@ target_link_libraries(diskscape PRIVATE
     Qt6::Svg
 )
 
+if(APPLE)
+    set_target_properties(diskscape PROPERTIES OUTPUT_NAME "Diskscape")
+endif()
+
 if (TARGET Qt6::DBus)
     target_link_libraries(diskscape PRIVATE Qt6::DBus)
     target_compile_definitions(diskscape PRIVATE DISKSCAPE_HAS_QT_DBUS)
