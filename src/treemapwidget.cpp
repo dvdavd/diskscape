@@ -62,7 +62,7 @@ protected:
         QPainter painter(this);
         painter.setRenderHint(QPainter::Antialiasing, false);
 
-        const QRectF bounds = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+        const QRectF bounds = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
         if (bounds.width() <= 1.0 || bounds.height() <= 1.0) {
             return;
         }
@@ -2203,6 +2203,9 @@ void TreemapWidget::updateTouchGesture(const QList<QEventPoint>& points)
         clampCameraOrigin(targetOrigin, m_cameraScale), m_cameraScale, pixelScale());
     m_cameraStartOrigin = m_cameraOrigin;
     m_cameraTargetOrigin = m_cameraOrigin;
+    m_cameraUseFocusAnchor = false;
+    m_cameraPreviousFrame = QPixmap();
+    m_cameraNextFrame = QPixmap();
     m_touchPanLastPos = pos;
     if (m_cameraScale <= kZoomedInThreshold) {
         m_semanticFocus = nullptr;
@@ -4634,6 +4637,9 @@ void TreemapWidget::mouseMoveEvent(QMouseEvent* event)
             clampCameraOrigin(targetOrigin, m_cameraScale), m_cameraScale, pixelScale());
         m_cameraStartOrigin = m_cameraOrigin;
         m_cameraTargetOrigin = m_cameraOrigin;
+        m_cameraUseFocusAnchor = false;
+        m_cameraPreviousFrame = QPixmap();
+        m_cameraNextFrame = QPixmap();
         syncScrollBars();
         viewport()->update();
         return;
