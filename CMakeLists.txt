@@ -24,7 +24,7 @@ if (DISKSCAPE_PORTABLE_X86_64 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64
 endif()
 
 if (WIN32)
-    set(SCANNER_BACKEND_SRC src/scanner_std.cpp)
+    set(SCANNER_BACKEND_SRC src/scanner_win32.cpp)
 else()
     set(SCANNER_BACKEND_SRC src/scanner_posix.cpp)
 endif()
