@@ -73,7 +73,7 @@ The main app target is produced as `diskscape`:
 ./build/Diskscape   # (macOS)
 ```
 
-macOS and Windows builds are unsupported and not optimised yet but do work.
+macOS and Windows builds are currently unsupported but fully functional.
 
 ## Install
 
