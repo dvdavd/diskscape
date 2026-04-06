@@ -173,6 +173,36 @@ private slots:
         // Original tree unchanged
         QCOMPARE(main.root->size, qint64(1000));
     }
+
+    void splice_updatesFilesystemTotalsFromRefresh()
+    {
+        ScanResult main = buildMainTree();
+        main.filesystems = {
+            {QStringLiteral("/"), QStringLiteral("/"), 100, 500, true},
+            {QStringLiteral("/mnt/data"), QStringLiteral("/mnt/data"), 200, 1000, true},
+        };
+        main.freeBytes = 300;
+        main.totalBytes = 1500;
+
+        auto refreshArena = std::make_shared<NodeArena>();
+        ScanResult refreshed;
+        refreshed.arena = refreshArena;
+        FileNode* newSub = refreshArena->alloc();
+        newSub->absolutePath = "/home/user/sub";
+        newSub->isDirectory = true;
+        newSub->size = 400;
+        refreshed.root = newSub;
+        refreshed.filesystems = {
+            {QStringLiteral("/"), QStringLiteral("/"), 150, 550, true},
+            {QStringLiteral("/media/usb"), QStringLiteral("/media/usb"), 50, 64, true},
+        };
+
+        QVERIFY(spliceRefreshedSubtree(main, "/home/user/sub", std::move(refreshed)));
+
+        QCOMPARE(main.filesystems.size(), 3);
+        QCOMPARE(main.freeBytes, qint64(400));
+        QCOMPARE(main.totalBytes, qint64(1614));
+    }
 };
 
 QTEST_MAIN(TestRefresh)

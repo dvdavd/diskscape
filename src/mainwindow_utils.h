@@ -32,6 +32,11 @@ struct BreadcrumbPathSegment {
     QString path;
 };
 
+struct FileNodeStats {
+    int fileCount = 0;
+    qint64 totalSize = 0;
+};
+
 QFont generalUiFont();
 void applyMenuFontPolicy(QApplication& app);
 // Keeps the QApplication palette aligned with the active platform style after
@@ -82,6 +87,7 @@ QStringList mountedDevicePaths();
 void sortChildrenBySizeRecursive(FileNode* node);
 void applyFreeSpaceNodeColor(FileNode* root, const TreemapSettings& settings);
 int countFilesRecursive(const FileNode* node);
+FileNodeStats fileNodeStats(const FileNode* node);
 int nodeDepth(const FileNode* node);
 std::vector<FileNode*> prepareRootResultForDisplay(ScanResult& scanResult, const QString& currentPath,
                                                    bool showFreeSpaceInOverview,

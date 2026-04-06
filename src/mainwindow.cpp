@@ -115,6 +115,58 @@ QString directoryDisplayName(const FileNode* node)
     return node->name;
 }
 
+QString canonicalOrNormalizedPath(const QString& path)
+{
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    return canonical.isEmpty() ? normalizedFilesystemPath(path) : canonical;
+}
+
+const FsInfo* filesystemForNode(const ScanResult& scanResult, const FileNode* node)
+{
+    if (!node || scanResult.filesystems.isEmpty()) {
+        return nullptr;
+    }
+
+    const QString nodePath = canonicalOrNormalizedPath(node->computePath());
+    const FsInfo* bestMatch = nullptr;
+    int bestLength = -1;
+    for (const FsInfo& fs : scanResult.filesystems) {
+        const QString fsRoot = canonicalOrNormalizedPath(fs.canonicalMountRoot);
+        if (!pathIsWithinRoot(nodePath, fsRoot)) {
+            continue;
+        }
+        if (fsRoot.size() > bestLength) {
+            bestMatch = &fs;
+            bestLength = fsRoot.size();
+        }
+    }
+    return bestMatch;
+}
+
+qint64 freeBytesForNodeView(const ScanResult& scanResult, const FileNode* node)
+{
+    if (!node || scanResult.filesystems.isEmpty()) {
+        return -1;
+    }
+
+    const QString nodePath = canonicalOrNormalizedPath(node->computePath());
+    const FsInfo* containingFs = filesystemForNode(scanResult, node);
+    qint64 totalFreeBytes = containingFs ? containingFs->freeBytes : 0;
+
+    for (const FsInfo& fs : scanResult.filesystems) {
+        if (containingFs && fs.canonicalMountRoot == containingFs->canonicalMountRoot) {
+            continue;
+        }
+
+        const QString fsRoot = canonicalOrNormalizedPath(fs.canonicalMountRoot);
+        if (pathIsWithinRoot(fsRoot, nodePath)) {
+            totalFreeBytes += fs.freeBytes;
+        }
+    }
+
+    return containingFs || totalFreeBytes > 0 ? totalFreeBytes : -1;
+}
+
 QStringList sanitizedLandingPaths(const QStringList& paths, int maxCount)
 {
     QStringList sanitized;
@@ -1291,6 +1343,57 @@ void MainWindow::syncFilesystemWatchControllerState()
         m_treemapWidget ? m_treemapWidget->currentNode() : nullptr);
 }
 
+void MainWindow::clearCompletedStatusLabels()
+{
+    if (m_completedFilesStatusLabel) {
+        m_completedFilesStatusLabel->clear();
+        m_completedFilesStatusLabel->setVisible(false);
+    }
+    if (m_completedTotalStatusLabel) {
+        m_completedTotalStatusLabel->clear();
+        m_completedTotalStatusLabel->setVisible(false);
+    }
+    if (m_completedFreeStatusLabel) {
+        m_completedFreeStatusLabel->clear();
+        m_completedFreeStatusLabel->setVisible(false);
+    }
+}
+
+void MainWindow::updateCompletedStatusLabels()
+{
+    if (!m_scanResult.root || !m_treemapWidget) {
+        clearCompletedStatusLabels();
+        return;
+    }
+
+    const FileNode* current = m_treemapWidget->currentNode();
+    if (!current || current->isVirtual) {
+        clearCompletedStatusLabels();
+        return;
+    }
+
+    const QLocale locale = QLocale::system();
+    const FileNodeStats currentStats = fileNodeStats(current);
+    if (m_completedFilesStatusLabel) {
+        m_completedFilesStatusLabel->setText(tr("Files: %1").arg(locale.toString(currentStats.fileCount)));
+        m_completedFilesStatusLabel->setVisible(true);
+    }
+    if (m_completedTotalStatusLabel) {
+        m_completedTotalStatusLabel->setText(tr("Total: %1").arg(locale.formattedDataSize(currentStats.totalSize)));
+        m_completedTotalStatusLabel->setVisible(true);
+    }
+    if (m_completedFreeStatusLabel) {
+        const qint64 freeBytes = freeBytesForNodeView(m_scanResult, current);
+        if (freeBytes >= 0) {
+            m_completedFreeStatusLabel->setText(tr("Free: %1").arg(locale.formattedDataSize(freeBytes)));
+            m_completedFreeStatusLabel->setVisible(true);
+        } else {
+            m_completedFreeStatusLabel->clear();
+            m_completedFreeStatusLabel->setVisible(false);
+        }
+    }
+}
+
 void MainWindow::openInitialPath(const QString& path)
 {
     activatePath(path, false);
@@ -1737,18 +1840,7 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
     m_liveScanResult = {};
     m_latestScannedBytes = 0;
     m_latestScanActivityPath = normalizedDir;
-    if (m_completedFilesStatusLabel) {
-        m_completedFilesStatusLabel->clear();
-        m_completedFilesStatusLabel->setVisible(false);
-    }
-    if (m_completedTotalStatusLabel) {
-        m_completedTotalStatusLabel->clear();
-        m_completedTotalStatusLabel->setVisible(false);
-    }
-    if (m_completedFreeStatusLabel) {
-        m_completedFreeStatusLabel->clear();
-        m_completedFreeStatusLabel->setVisible(false);
-    }
+    clearCompletedStatusLabels();
     {
         QMutexLocker locker(&m_scanProgressMutex);
         m_pendingScanProgress.reset();
@@ -2340,18 +2432,7 @@ void MainWindow::updateScanStatusMessage()
         return;
     }
 
-    if (m_completedFilesStatusLabel) {
-        m_completedFilesStatusLabel->clear();
-        m_completedFilesStatusLabel->setVisible(false);
-    }
-    if (m_completedTotalStatusLabel) {
-        m_completedTotalStatusLabel->clear();
-        m_completedTotalStatusLabel->setVisible(false);
-    }
-    if (m_completedFreeStatusLabel) {
-        m_completedFreeStatusLabel->clear();
-        m_completedFreeStatusLabel->setVisible(false);
-    }
+    clearCompletedStatusLabels();
 
     const QString scanPath = m_latestScanActivityPath.isEmpty()
         ? QDir::toNativeSeparators(m_currentPath)
@@ -2548,24 +2629,7 @@ void MainWindow::onScanFinished()
     m_incrementalRefreshInProgress = false;
     syncFilesystemWatchControllerState();
 
-    // Status bar info
-    const QLocale locale = QLocale::system();
-    const int count = countFilesRecursive(m_scanResult.root);
-    const QString countStr = locale.toString(count);
-    QString totalStr = locale.formattedDataSize(m_scanResult.root->size);
-    QString freeStr = locale.formattedDataSize(m_scanResult.freeBytes);
-    if (m_completedFilesStatusLabel) {
-        m_completedFilesStatusLabel->setText(tr("Files: %1").arg(countStr));
-        m_completedFilesStatusLabel->setVisible(true);
-    }
-    if (m_completedTotalStatusLabel) {
-        m_completedTotalStatusLabel->setText(tr("Total: %1").arg(totalStr));
-        m_completedTotalStatusLabel->setVisible(true);
-    }
-    if (m_completedFreeStatusLabel) {
-        m_completedFreeStatusLabel->setText(tr("Free: %1").arg(freeStr));
-        m_completedFreeStatusLabel->setVisible(true);
-    }
+    updateCompletedStatusLabels();
     if (backgroundRefresh) {
         statusBar()->showMessage(tr("Refreshed"));
     } else {
@@ -3278,6 +3342,7 @@ void MainWindow::updateWindowTitle()
 void MainWindow::updateCurrentViewUi()
 {
     updateWindowTitle();
+    updateCompletedStatusLabels();
 
     if (!m_treemapWidget) {
         return;
@@ -3451,18 +3516,7 @@ void MainWindow::clearCurrentTreemap()
         m_warningsMenuAction->setIcon(m_permissionWarningIcon);
     }
     m_showPermissionPanel = false;
-    if (m_completedFilesStatusLabel) {
-        m_completedFilesStatusLabel->clear();
-        m_completedFilesStatusLabel->setVisible(false);
-    }
-    if (m_completedTotalStatusLabel) {
-        m_completedTotalStatusLabel->clear();
-        m_completedTotalStatusLabel->setVisible(false);
-    }
-    if (m_completedFreeStatusLabel) {
-        m_completedFreeStatusLabel->clear();
-        m_completedFreeStatusLabel->setVisible(false);
-    }
+    clearCompletedStatusLabels();
 
     m_treemapWidget->setScanPath(QString());
     m_treemapWidget->setScanInProgress(false);
@@ -3882,6 +3936,7 @@ void MainWindow::finalizeIncrementalRefresh(IncrementalRefreshResult refreshed)
     m_dirtyPaths.insert(refreshPath);
     setRefreshBusy(false);
     updateDirectoryTreePanel();
+    updateCompletedStatusLabels();
     updateCurrentViewUi();
     statusBar()->showMessage(tr("Refreshed: %1").arg(statusBarDisplayPath(refreshPath)), 3000);
     updateNavigationActions();

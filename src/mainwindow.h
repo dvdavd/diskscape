@@ -82,6 +82,8 @@ private:
     void finalizeIncrementalRefresh(IncrementalRefreshResult refreshed);
     void onScanProgress(ScanResult scanResult);
     void updateScanStatusMessage();
+    void clearCompletedStatusLabels();
+    void updateCompletedStatusLabels();
     void refreshTypeLegendAsync(FileNode* root);
     void scheduleTreeMaintenance();
     void restoreHistoryFromPaths(const std::vector<ViewStatePaths>& historyPaths, FileNode* root);

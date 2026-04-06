@@ -1238,6 +1238,24 @@ int countFilesRecursive(const FileNode* node)
     return count;
 }
 
+FileNodeStats fileNodeStats(const FileNode* node)
+{
+    if (!node || node->isVirtual) {
+        return {};
+    }
+
+    FileNodeStats stats;
+    if (!node->isDirectory) {
+        stats.fileCount = 1;
+    } else if (node->subtreeFileCount > 0 || node->children.empty()) {
+        stats.fileCount = node->subtreeFileCount;
+    } else {
+        stats.fileCount = countFilesRecursive(node);
+    }
+    stats.totalSize = node->size;
+    return stats;
+}
+
 int nodeDepth(const FileNode* node)
 {
     int depth = 0;
@@ -1425,6 +1443,7 @@ bool spliceRefreshedSubtree(ScanResult& main, const QString& targetPath, ScanRes
         return false;
 
     const qint64 oldSize = targetNode->size;
+    const int oldFileCount = targetNode->subtreeFileCount;
     FileNode* parent = targetNode->parent;
     FileNode* newRoot = refreshed.root;
     newRoot->parent = parent;
@@ -1437,8 +1456,32 @@ bool spliceRefreshedSubtree(ScanResult& main, const QString& targetPath, ScanRes
     }
 
     const qint64 sizeDelta = newRoot->size - oldSize;
+    const int fileCountDelta = newRoot->subtreeFileCount - oldFileCount;
     for (FileNode* current = parent; current; current = current->parent)
         current->size += sizeDelta;
+    for (FileNode* current = parent; current; current = current->parent)
+        current->subtreeFileCount += fileCountDelta;
+
+    if (!refreshed.filesystems.isEmpty()) {
+        for (const FsInfo& refreshedFs : refreshed.filesystems) {
+            auto it = std::find_if(main.filesystems.begin(), main.filesystems.end(),
+                                   [&refreshedFs](const FsInfo& existingFs) {
+                                       return existingFs.canonicalMountRoot == refreshedFs.canonicalMountRoot;
+                                   });
+            if (it != main.filesystems.end()) {
+                *it = refreshedFs;
+            } else {
+                main.filesystems.push_back(refreshedFs);
+            }
+        }
+
+        main.freeBytes = 0;
+        main.totalBytes = 0;
+        for (const FsInfo& fs : main.filesystems) {
+            main.freeBytes += fs.freeBytes;
+            main.totalBytes += fs.totalBytes;
+        }
+    }
 
     main.arena->merge(std::move(*refreshed.arena));
     return true;

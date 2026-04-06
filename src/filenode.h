@@ -58,6 +58,7 @@ struct FileNode {
     std::vector<FileNode*> children;  // raw ptrs; owned by the NodeArena in ScanResult
     FileNode* parent = nullptr;
     qint64 size = 0;
+    int subtreeFileCount = 0;
     QRgb color = 0;           // ARGB; alpha==0 means "not yet assigned"
     uint64_t extKey = 0;      // packed lowercase ASCII extension for files; 0 = none/unsupported
     uint32_t id = UINT32_MAX; // assigned by rebuildSearchMetadata(); UINT32_MAX = unnumbered/virtual

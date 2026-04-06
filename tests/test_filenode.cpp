@@ -155,6 +155,63 @@ private slots:
         QCOMPARE(normalizedFilesystemPath(" /tmp//demo/../demo2 "), QStringLiteral("/tmp/demo2"));
     }
 
+    void fileNodeStats_ignoresVirtualNodes()
+    {
+        FileNode virtualNode;
+        virtualNode.isVirtual = true;
+        virtualNode.size = 123;
+
+        const FileNodeStats stats = fileNodeStats(&virtualNode);
+        QCOMPARE(stats.fileCount, 0);
+        QCOMPARE(stats.totalSize, qint64(0));
+    }
+
+    void fileNodeStats_reportsRecursiveFileCountAndNodeSize()
+    {
+        FileNode root;
+        root.absolutePath = QStringLiteral("/scan");
+        root.isDirectory = true;
+        root.size = 330;
+
+        FileNode childDir;
+        childDir.name = QStringLiteral("subdir");
+        childDir.isDirectory = true;
+        childDir.size = 230;
+        childDir.parent = &root;
+
+        FileNode rootFile;
+        rootFile.name = QStringLiteral("root.bin");
+        rootFile.size = 100;
+        rootFile.parent = &root;
+
+        FileNode nestedFileA;
+        nestedFileA.name = QStringLiteral("a.txt");
+        nestedFileA.size = 200;
+        nestedFileA.parent = &childDir;
+
+        FileNode nestedVirtual;
+        nestedVirtual.name = QStringLiteral("Free Space");
+        nestedVirtual.isVirtual = true;
+        nestedVirtual.size = 999;
+        nestedVirtual.parent = &childDir;
+
+        FileNode nestedFileB;
+        nestedFileB.name = QStringLiteral("b.txt");
+        nestedFileB.size = 30;
+        nestedFileB.parent = &childDir;
+
+        root.children = {&childDir, &rootFile};
+        childDir.children = {&nestedFileA, &nestedVirtual, &nestedFileB};
+
+        const FileNodeStats rootStats = fileNodeStats(&root);
+        QCOMPARE(rootStats.fileCount, 3);
+        QCOMPARE(rootStats.totalSize, qint64(330));
+
+        const FileNodeStats childStats = fileNodeStats(&childDir);
+        QCOMPARE(childStats.fileCount, 2);
+        QCOMPARE(childStats.totalSize, qint64(230));
+    }
+
 #ifdef Q_OS_WIN
     void normalizedFilesystemPath_expandsBareDriveRoot()
     {

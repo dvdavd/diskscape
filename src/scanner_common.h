@@ -203,6 +203,7 @@ FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,
     copy->name = node->name;
     copy->absolutePath = node->absolutePath;
     copy->size = node->size;
+    copy->subtreeFileCount = node->subtreeFileCount;
     copy->isDirectory = node->isDirectory;
     copy->isVirtual = node->isVirtual;
     copy->color = node->color;

@@ -91,6 +91,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
     }
     emitProgress(scanState, path, progressReadyCallback, progressCallback);
     qint64 totalSize = 0;
+    int totalFileCount = 0;
 
     const QString childPathPrefix = childPathPrefixForParent(path);
     std::error_code ec;
@@ -140,6 +141,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                                        progressReadyCallback, progressCallback, arena, activityCallback,
                                        errorCallback, branchHue, rootDev, cancelFlag, depth + 1);
                 totalSize += child->size;
+                totalFileCount += child->subtreeFileCount;
                 if (depth <= 1 && !isCancelled(cancelFlag))
                     emitProgress(scanState, childPath, progressReadyCallback, progressCallback);
             }
@@ -151,10 +153,12 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                 activityCallback(childPath, entryInfo.fileSize);
             }
             child->size = entryInfo.fileSize;
+            child->subtreeFileCount = 1;
             child->extKey = ColorUtils::packFileExt(child->name);
             child->color = ColorUtils::fileColorForName(child->name, settings).rgba();
             node->children.push_back(child);
             totalSize += entryInfo.fileSize;
+            totalFileCount += 1;
             if (depth <= 1 && !isCancelled(cancelFlag))
                 emitProgress(scanState, childPath.isEmpty() ? path : childPath, progressReadyCallback, progressCallback);
         }
@@ -166,6 +170,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
     }
 
     node->size = totalSize;
+    node->subtreeFileCount = totalFileCount;
     return totalSize;
 }
 
