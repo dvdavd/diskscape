@@ -7,6 +7,7 @@
 #include "mainwindow_utils.h"
 #include "treemapwidget.h"
 
+#include <QAbstractItemView>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -60,6 +61,28 @@ constexpr int kGradientPresetSwatchWidth = 80;
 constexpr int kGradientPresetSwatchMargin = 5;
 constexpr int kGradientPresetTrailingInset = 22;
 constexpr int kSettingsScrollBarGap = 6;
+constexpr auto kComfortableListViewStyle =
+    "QListView::item {"
+    "  padding-top: 3px;"
+    "  padding-bottom: 3px;"
+    "}";
+
+bool usesFusionStyle(const QWidget* widget)
+{
+    Q_UNUSED(widget);
+    const QStyle* style = QApplication::style();
+    return style && style->objectName().compare(QStringLiteral("fusion"), Qt::CaseInsensitive) == 0;
+}
+
+void applyComfortableItemSpacing(QAbstractItemView* view)
+{
+    if (!view) {
+        return;
+    }
+    view->setStyleSheet(usesFusionStyle(view)
+        ? QString::fromLatin1(kComfortableListViewStyle)
+        : QString());
+}
 
 class SettingsPageScrollArea final : public QScrollArea {
 public:
@@ -495,6 +518,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_excludedPathEdit->setPlaceholderText(tr("/var/lib/docker"));
     m_excludedPathsList = new QListWidget(this);
     m_excludedPathsList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    applyComfortableItemSpacing(m_excludedPathsList);
     m_randomColorForUnknownFiles = new QCheckBox(tr("Use random colours for unspecified file types"), this);
     m_unknownFileTypeColorButton = new QPushButton(this);
     m_unknownFileTypeColorButton->setMinimumWidth(100);
@@ -521,6 +545,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
 
     m_fileTypeGroupsList = new QListWidget(this);
     m_fileTypeGroupsList->setSelectionMode(QAbstractItemView::SingleSelection);
+    applyComfortableItemSpacing(m_fileTypeGroupsList);
     m_fileTypeGroupName = new QLineEdit(this);
     m_fileTypeGroupColorButton = new QPushButton(this);
     m_fileTypeGroupColorButton->setMinimumWidth(100);

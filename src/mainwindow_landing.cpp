@@ -415,12 +415,21 @@ void MainWindow::updatePathBarChrome()
         return;
     }
 
+    m_searchEdit->ensurePolished();
     int controlHeight = qMax(m_searchEdit->sizeHint().height(), m_pathBar->sizeHint().height());
     if (m_sizeFilterCombo) {
         m_sizeFilterCombo->ensurePolished();
         controlHeight = qMax(controlHeight, m_sizeFilterCombo->sizeHint().height());
     }
+#ifdef Q_OS_MACOS
+    m_pathBar->setFixedHeight(qMax(m_pathBar->sizeHint().height(), controlHeight));
+    m_searchEdit->setMinimumHeight(0);
+    m_searchEdit->setMaximumHeight(QWIDGETSIZE_MAX);
+#else
     m_pathBar->setFixedHeight(controlHeight);
+    m_searchEdit->setFixedHeight(controlHeight);
+#endif
+    m_searchEdit->updateGeometry();
     if (m_sizeFilterCombo) {
         m_sizeFilterCombo->setFixedHeight(controlHeight);
         m_sizeFilterCombo->updateGeometry();

@@ -23,6 +23,12 @@
 #include <QToolButton>
 
 namespace {
+bool usesFusionStyle(const QWidget* widget)
+{
+    Q_UNUSED(widget);
+    const QStyle* style = QApplication::style();
+    return style && style->objectName().compare(QStringLiteral("fusion"), Qt::CaseInsensitive) == 0;
+}
 
 }
 
@@ -102,6 +108,7 @@ BreadcrumbPathBar::BreadcrumbPathBar(QWidget* parent)
     });
     m_lineEdit->installEventFilter(this);
 
+    refreshLayoutMetrics();
     refreshChromeStyles();
     m_breadcrumbView->setFont(generalFont);
     rebuildCrumbs();
@@ -197,6 +204,7 @@ void BreadcrumbPathBar::changeEvent(QEvent* event)
     case QEvent::ApplicationFontChange:
         m_breadcrumbView->setFont(generalUiFont());
         m_lineEdit->setFont(generalUiFont());
+        refreshLayoutMetrics();
         rebuildCrumbs();
         refreshChromeStyles();
         if (m_editButton) {
@@ -208,6 +216,17 @@ void BreadcrumbPathBar::changeEvent(QEvent* event)
     default:
         break;
     }
+}
+
+void BreadcrumbPathBar::refreshLayoutMetrics()
+{
+    if (!m_fieldFrame || !m_fieldFrame->layout()) {
+        return;
+    }
+
+    const bool fusion = usesFusionStyle(this);
+    m_fieldFrame->layout()->setContentsMargins(6, fusion ? 1 : 2, 4, fusion ? 3 : 2);
+    updateGeometry();
 }
 
 void BreadcrumbPathBar::refreshChromeStyles()
@@ -346,7 +365,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  background: transparent;"
                 "  border: 1px solid transparent;"
                 "  border-radius: 4px;"
-                "  padding: 0px 2px 2px 2px;"
+                "  padding: 0px 2px;"
                 "}"
                 "QToolButton:hover {"
                 "  border-color: palette(highlight);"
@@ -362,7 +381,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  background: transparent;"
                 "  border: 1px solid transparent;"
                 "  border-radius: 4px;"
-                "  padding: 0px 2px 2px 2px;"
+                "  padding: 0px 2px;"
                 "}"
                 "QToolButton:hover {"
                 "  color: palette(button-text);"
@@ -394,7 +413,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  color: palette(window-text);"
                 "  border: 1px solid transparent;"
                 "  border-radius: 3px;"
-                "  padding: 0px 0px 2px 0px;"
+                "  padding: 0px;"
                 "}"
                 "QToolButton:hover {"
                 "  border-color: palette(highlight);"

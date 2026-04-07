@@ -40,7 +40,6 @@ int main(int argc, char* argv[])
                                        QIcon(QStringLiteral(":/assets/diskscape_appicon.svg"))));
     app.setFont(QFontDatabase::systemFont(QFontDatabase::GeneralFont), "QMenu");
     syncApplicationPaletteToColorScheme(app, systemUsesDarkColorScheme());
-
     QCommandLineParser parser;
     parser.setApplicationDescription("Diskscape");
     parser.addHelpOption();

@@ -44,6 +44,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+    void refreshLayoutMetrics();
     void refreshChromeStyles();
     void rebuildCrumbs();
     QMenu* createChildMenu(const QString& parentPath) const;

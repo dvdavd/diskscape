@@ -11,6 +11,7 @@
 #include "scanner.h"
 #include "settingsdialog.h"
 
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QClipboard>
 #include <QCoreApplication>
@@ -75,6 +76,52 @@ constexpr int kDirectoryNodeRole = Qt::UserRole + 7;
 constexpr int kLegendColorRole = Qt::UserRole + 2;
 constexpr QChar kLeftToRightIsolate(0x2066);
 constexpr QChar kPopDirectionalIsolate(0x2069);
+constexpr auto kComfortableItemViewStyle =
+    "QTreeView::item {"
+    "  padding-top: 3px;"
+    "  padding-bottom: 3px;"
+    "}"
+    "QHeaderView::section {"
+    "  padding-left: 6px;"
+    "  padding-right: 6px;"
+    "  padding-top: 3px;"
+    "  padding-bottom: 3px;"
+    "}"
+    "QListView::item {"
+    "  padding-top: 3px;"
+    "  padding-bottom: 3px;"
+    "}";
+
+bool usesFusionStyle(const QWidget* widget)
+{
+    Q_UNUSED(widget);
+    const QStyle* style = QApplication::style();
+    return style && style->objectName().compare(QStringLiteral("fusion"), Qt::CaseInsensitive) == 0;
+}
+
+void applyComfortableItemSpacing(QAbstractItemView* view)
+{
+    if (!view) {
+        return;
+    }
+    view->setStyleSheet(usesFusionStyle(view)
+        ? QString::fromLatin1(kComfortableItemViewStyle)
+        : QString());
+}
+
+void applyStableItemTextBrush(QTreeWidget* tree, QTreeWidgetItem* item)
+{
+    if (!tree || !item) {
+        return;
+    }
+
+    const QBrush textBrush = tree->palette().brush(tree->isEnabled() ? QPalette::Active
+                                                                     : QPalette::Disabled,
+                                                   QPalette::Text);
+    for (int column = 0; column < tree->columnCount(); ++column) {
+        item->setForeground(column, textBrush);
+    }
+}
 
 QStringList defaultFavouritePaths()
 {
@@ -328,6 +375,14 @@ public:
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         const QColor swatchColor = index.data(kLegendColorRole).value<QColor>();
+        if (!(opt.state & QStyle::State_Enabled)) {
+            opt.palette.setCurrentColorGroup(QPalette::Disabled);
+        } else if (const QWidget* widget = option.widget; widget && widget->window()->isActiveWindow()) {
+            opt.state |= QStyle::State_Active;
+            opt.palette.setCurrentColorGroup(QPalette::Active);
+        } else {
+            opt.palette.setCurrentColorGroup(QPalette::Inactive);
+        }
 
         opt.icon = QIcon();
         const qreal swatchSize = std::min<qreal>(option.rect.height() - 8.0, 11.0);
@@ -764,8 +819,6 @@ void MainWindow::setupToolbar(QSettings& store)
     m_searchEdit->setPlaceholderText(searchPatternPlaceholderText());
     m_searchEdit->setFixedWidth(190);
     m_searchEdit->setToolTip(tr("Type a filename pattern and press Enter to search"));
-    m_pathBar->setFixedHeight(qMax(m_searchEdit->sizeHint().height(), m_pathBar->sizeHint().height()));
-    updatePathBarChrome();
     connect(m_searchEdit, &QLineEdit::returnPressed, this, &MainWindow::applySearchFromToolbar);
     connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
         if (!m_treemapWidget) {
@@ -804,6 +857,7 @@ void MainWindow::setupToolbar(QSettings& store)
     connect(m_sizeFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::applySearchFromToolbar);
     updateSizeFilterChrome();
+    updatePathBarChrome();
     m_toolbar->addWidget(m_sizeFilterCombo);
 
     auto* menuSpacer = new QWidget(this);
@@ -974,6 +1028,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
     m_directoryTree->header()->setSectionsMovable(false);
     m_directoryTree->header()->setSortIndicatorShown(true);
     m_directoryTree->header()->setSectionResizeMode(QHeaderView::Interactive);
+    applyComfortableItemSpacing(m_directoryTree);
     m_directoryTree->setItemDelegateForColumn(1, new DirectoryUsageBarDelegate(m_directoryTree));
     m_directoryTree->setSortingEnabled(true);
     m_directoryTree->header()->setSortIndicator(1, Qt::DescendingOrder);
@@ -1036,6 +1091,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
     m_typeLegendTree->header()->setSectionsMovable(false);
     m_typeLegendTree->header()->setSortIndicatorShown(true);
     m_typeLegendTree->header()->setSectionResizeMode(QHeaderView::Interactive);
+    applyComfortableItemSpacing(m_typeLegendTree);
     m_typeLegendTree->setSortingEnabled(true);
     m_typeLegendTree->header()->setSortIndicator(1, Qt::DescendingOrder);
     m_typeLegendTree->setItemDelegateForColumn(0, new LegendTypeDelegate(m_typeLegendTree));
@@ -1054,6 +1110,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
     m_permissionErrorList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_permissionErrorList->setUniformItemSizes(true);
     m_permissionErrorList->setFocusPolicy(Qt::StrongFocus);
+    applyComfortableItemSpacing(m_permissionErrorList);
     permissionErrorLayout->addWidget(m_permissionErrorList, 1);
 
     connect(m_toggleDirectoryTreeAction, &QAction::toggled, this, [this](bool checked) {
@@ -1498,9 +1555,18 @@ void MainWindow::onThemeSettled()
     }
 
     if (m_directoryTree) {
+        applyComfortableItemSpacing(m_directoryTree);
         for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i)
             refreshDirectoryTreeIcons(m_directoryTree->topLevelItem(i));
         m_directoryTree->viewport()->update();
+    }
+    if (m_typeLegendTree) {
+        applyComfortableItemSpacing(m_typeLegendTree);
+        m_typeLegendTree->viewport()->update();
+    }
+    if (m_permissionErrorList) {
+        applyComfortableItemSpacing(m_permissionErrorList);
+        m_permissionErrorList->viewport()->update();
     }
     updateTypeLegendPanel();
 }
@@ -2149,6 +2215,7 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
             filesItem->setText(0, tr("Files"));
             filesItem->setIcon(0, directoryTreeFilesIcon());
             filesItem->setText(2, QLocale::system().formattedDataSize(filesSize));
+            applyStableItemTextBrush(m_directoryTree, filesItem);
             filesItem->setData(0, kDirectorySyntheticFilesRole, true);
             filesItem->setData(0, kDirectorySortValueRole, QStringLiteral("files"));
             filesItem->setData(1, kDirectoryUsagePercentRole,
@@ -2169,6 +2236,7 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
         const QColor childColor = QColor::fromRgba(child->color);
         childItem->setIcon(0, directoryTreeFolderIcon(childColor));
         childItem->setText(2, QLocale::system().formattedDataSize(child->size));
+        applyStableItemTextBrush(m_directoryTree, childItem);
         childItem->setData(0, kDirectoryPathRole, childPath);
         childItem->setData(0, kDirectoryLoadedRole, false);
         childItem->setData(0, kDirectorySortValueRole, directoryDisplayName(child).toCaseFolded());
@@ -2195,6 +2263,7 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
         filesItem->setText(0, tr("Files"));
         filesItem->setIcon(0, directoryTreeFilesIcon());
         filesItem->setText(2, QLocale::system().formattedDataSize(filesSize));
+        applyStableItemTextBrush(m_directoryTree, filesItem);
         filesItem->setData(0, kDirectorySyntheticFilesRole, true);
         filesItem->setData(0, kDirectorySortValueRole, QStringLiteral("files"));
         filesItem->setData(1, kDirectoryUsagePercentRole,
@@ -2310,6 +2379,7 @@ void MainWindow::updateDirectoryTreePanel()
     const QColor rootColor = QColor::fromRgba(m_scanResult.root->color);
     rootItem->setIcon(0, directoryTreeFolderIcon(rootColor));
     rootItem->setText(2, QLocale::system().formattedDataSize(m_scanResult.root->size));
+    applyStableItemTextBrush(m_directoryTree, rootItem);
     rootItem->setData(0, kDirectoryPathRole, rootPath);
     rootItem->setData(0, kDirectoryLoadedRole, false);
     rootItem->setData(0, kDirectorySortValueRole, directoryDisplayName(m_scanResult.root).toCaseFolded());

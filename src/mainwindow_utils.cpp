@@ -886,6 +886,9 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
     int totalCount = 0;
 
     const QLocale locale = QLocale::system();
+    const QBrush textBrush = tree->palette().brush(tree->isEnabled() ? QPalette::Active
+                                                                     : QPalette::Disabled,
+                                                   QPalette::Text);
     QList<QTreeWidgetItem*> items;
     items.reserve(ordered.size());
     QTreeWidgetItem* selectedItem = nullptr;
@@ -903,6 +906,9 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
         item->setData(1, kLegendSortValueRole, summary.totalSize);
         item->setText(2, locale.toString(summary.count));
         item->setData(2, kLegendSortValueRole, summary.count);
+        item->setForeground(0, textBrush);
+        item->setForeground(1, textBrush);
+        item->setForeground(2, textBrush);
         item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
         if (summary.label == highlightedType) {
@@ -923,6 +929,8 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
         tree->sortItems(sortColumn, sortOrder);
     }
     tree->setUpdatesEnabled(true);
+    tree->doItemsLayout();
+    tree->viewport()->update();
 
     if (!foundHighlightedType && treemapWidget) {
         treemapWidget->setHighlightedFileType(QString());
