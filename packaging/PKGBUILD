@@ -11,23 +11,27 @@ depends=(
 )
 makedepends=(
     'cmake'
-    'git'
     'qt6-tools'
 )
-source=("${pkgname}::git+https://github.com/dvdavd/diskscape")
-sha256sums=('SKIP')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/${pkgver}.tar.gz")
+sha256sums=('d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed')
 
 build() {
     local cmake_args=(
-        -S "${srcdir}/${pkgname}"
+        -S "${srcdir}/${pkgname}-${pkgver}"
         -B build
-        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_BUILD_TYPE=None
         -DCMAKE_INSTALL_PREFIX=/usr
         -DCMAKE_INSTALL_LIBDIR=lib
+        -DBUILD_TESTING=ON
     )
 
     cmake "${cmake_args[@]}"
-    cmake --build build --target diskscape
+    cmake --build build
+}
+
+check() {
+    QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 }
 
 package() {
