@@ -81,8 +81,44 @@ target_link_libraries(diskscape PRIVATE
     Qt6::Svg
 )
 
+if(WIN32)
+    set_target_properties(diskscape PROPERTIES WIN32_EXECUTABLE TRUE)
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/diskscape.ico")
+        configure_file(
+            packaging/windows/diskscape.rc.in
+            diskscape.rc
+            @ONLY
+        )
+        target_sources(diskscape PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/diskscape.rc)
+    endif()
+
+    configure_file(
+        packaging/windows/installer.nsi.in
+        installer.nsi
+        @ONLY
+    )
+endif()
+
 if(APPLE)
-    set_target_properties(diskscape PROPERTIES OUTPUT_NAME "Diskscape")
+    set_target_properties(diskscape PROPERTIES
+        OUTPUT_NAME "Diskscape"
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Diskscape"
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.dvdavd.Diskscape"
+        MACOSX_BUNDLE_COPYRIGHT "© 2026 dvdavd"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+    )
+
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/diskscape.icns")
+        target_sources(diskscape PRIVATE packaging/macos/diskscape.icns)
+        set_source_files_properties(packaging/macos/diskscape.icns
+            PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        set_target_properties(diskscape PROPERTIES
+            MACOSX_BUNDLE_ICON_FILE "diskscape.icns")
+    endif()
 endif()
 
 if (TARGET Qt6::DBus)
@@ -107,6 +143,7 @@ target_link_libraries(scanner_bench PRIVATE
 )
 
 install(TARGETS diskscape
+    BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

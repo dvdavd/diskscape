@@ -3451,21 +3451,23 @@ void TreemapWidget::animateCameraTo(qreal scale, const QPointF& origin,
     }
 
     if (m_settings.fastWheelZoom && m_current && !viewport()->size().isEmpty()) {
+        // Render previous frame first and copy it out, so the second render into
+        // m_liveFrame doesn't clobber it. The next frame is left sharing m_liveFrame
+        // (safe: the animation paint branch never calls renderSceneToPixmap, and the
+        // finished handler clears both frames before the next paint).
+        // Both frames are rendered at the current semantic depth so no extra layout
+        // work is needed; the depth transition is handled by the finished handler.
         m_cameraPreviousFrame = renderSceneToPixmap(m_current).copy();
-        
+
         const qreal savedScale = m_cameraScale;
         const QPointF savedOrigin = m_cameraOrigin;
-        const int savedDepth = m_activeSemanticDepth;
-        
         m_cameraScale = m_cameraTargetScale;
         m_cameraOrigin = m_cameraTargetOrigin;
-        m_activeSemanticDepth = desiredSemanticDepthForScale(m_cameraTargetScale);
-        
-        m_cameraNextFrame = renderSceneToPixmap(m_current).copy();
-        
+
+        m_cameraNextFrame = renderSceneToPixmap(m_current);
+
         m_cameraScale = savedScale;
         m_cameraOrigin = savedOrigin;
-        m_activeSemanticDepth = savedDepth;
     }
 
     m_cameraAnimation.start();

@@ -2744,9 +2744,6 @@ void MainWindow::onLimitToSameFilesystemToggled(bool checked)
     QSettings store = appSettings();
     m_settings.save(store);
 
-    if (m_scanInProgress && !m_backgroundRefreshInProgress) {
-        startScan(m_currentPath, true);
-    }
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
