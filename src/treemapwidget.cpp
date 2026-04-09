@@ -4648,20 +4648,24 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                         const QSize imgSize = pixmap.size();
                         const bool isAnimatingFade = (loadAlpha < 1.0);
                         p.setRenderHint(QPainter::SmoothPixmapTransform, !isAnimatingFade);
-                        const int fitMode = m_settings.thumbnailFitMode;
-                        if (fitMode == TreemapSettings::ThumbnailFill) {
-                            QSizeF scaledSize = QSizeF(imgSize).scaled(ri.size(), Qt::KeepAspectRatioByExpanding);
-                            QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
-                            imgRect.moveCenter(ri.center());
-                            p.setClipRect(ri);
-                            p.drawPixmap(imgRect, pixmap, pixmap.rect());
-                        } else if (fitMode == TreemapSettings::ThumbnailFit) {
-                            QSizeF scaledSize = QSizeF(imgSize).scaled(ri.size(), Qt::KeepAspectRatio);
-                            QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
-                            imgRect.moveCenter(ri.center());
-                            p.drawPixmap(imgRect, pixmap, pixmap.rect());
-                        } else {
-                            p.drawPixmap(ri, pixmap, pixmap.rect());
+                        const QRectF thumbnailRect = ri.adjusted(
+                            outlineWidth, outlineWidth, -outlineWidth, -outlineWidth);
+                        if (thumbnailRect.width() > 0.0 && thumbnailRect.height() > 0.0) {
+                            const int fitMode = m_settings.thumbnailFitMode;
+                            if (fitMode == TreemapSettings::ThumbnailFill) {
+                                QSizeF scaledSize = QSizeF(imgSize).scaled(thumbnailRect.size(), Qt::KeepAspectRatioByExpanding);
+                                QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
+                                imgRect.moveCenter(thumbnailRect.center());
+                                p.setClipRect(thumbnailRect);
+                                p.drawPixmap(imgRect, pixmap, pixmap.rect());
+                            } else if (fitMode == TreemapSettings::ThumbnailFit) {
+                                QSizeF scaledSize = QSizeF(imgSize).scaled(thumbnailRect.size(), Qt::KeepAspectRatio);
+                                QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
+                                imgRect.moveCenter(thumbnailRect.center());
+                                p.drawPixmap(imgRect, pixmap, pixmap.rect());
+                            } else {
+                                p.drawPixmap(thumbnailRect, pixmap, pixmap.rect());
+                            }
                         }
                         p.restore();
                     }
