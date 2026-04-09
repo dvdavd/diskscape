@@ -1239,6 +1239,10 @@ int countFilesRecursive(const FileNode* node)
         return 1;
     }
 
+    if (node->subtreeFileCount > 0) {
+        return node->subtreeFileCount;
+    }
+
     int count = 0;
     for (const FileNode* child : node->children) {
         count += countFilesRecursive(child);

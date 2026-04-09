@@ -2185,8 +2185,8 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
         return;
     }
 
-    const QString path = item->data(0, kDirectoryPathRole).toString();
-    FileNode* node = findNodeByPath(m_scanResult.root, path);
+    FileNode* node = reinterpret_cast<FileNode*>(
+        item->data(0, kDirectoryNodeRole).value<quintptr>());
     if (!node || !node->isDirectory || node->isVirtual) {
         item->setData(0, kDirectoryLoadedRole, true);
         return;

@@ -506,6 +506,20 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_fastWheelZoom = new QCheckBox(tr("Use fast wheel zoom animation (stretch/blend)"), this);
     m_trackpadScrollPans = new QCheckBox(tr("Scroll pans, Ctrl+scroll zooms (trackpad mode)"), this);
     m_simpleTooltips = new QCheckBox(tr("Use smaller, simpler tooltips in the treemap"));
+    m_showThumbnails = new QCheckBox(tr("Show image previews for image files"));
+    m_thumbnailFitMode = new QComboBox(this);
+    m_thumbnailFitMode->addItem(tr("Fill (crop to tile, keep aspect ratio)"), TreemapSettings::ThumbnailFill);
+    m_thumbnailFitMode->addItem(tr("Fit (letterbox, keep aspect ratio)"), TreemapSettings::ThumbnailFit);
+    m_thumbnailFitMode->addItem(tr("Stretch (ignore aspect ratio)"), TreemapSettings::ThumbnailStretch);
+    m_thumbnailResolution = createSpinBox(64, 1024, 64);
+    m_thumbnailResolution->setSuffix(tr(" px"));
+    m_thumbnailMinTileSize = createSpinBox(32, 256, 8);
+    m_thumbnailMemoryLimitMB = createSpinBox(64, 4096, 64);
+    m_thumbnailMemoryLimitMB->setSuffix(tr(" MB"));
+    m_thumbnailMaxFileSizeMB = createSpinBox(0, 500, 10);
+    m_thumbnailMaxFileSizeMB->setSuffix(tr(" MB"));
+    m_thumbnailMaxFileSizeMB->setSpecialValueText(tr("Unlimited"));
+    m_thumbnailSkipNetworkPaths = new QCheckBox(tr("Skip files on network filesystems"));
     m_cameraMaxScale = new QSlider(Qt::Horizontal, this);
     m_cameraMaxScale->setRange(1, 512);
     m_cameraMaxScale->setSingleStep(1);
@@ -559,6 +573,23 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_previewWidget->setWheelZoomEnabled(false);
     m_previewWidget->setAttribute(Qt::WA_TransparentForMouseEvents);
     buildPreviewTree();
+
+    // Pre-seed the sample thumbnail so it shows immediately when thumbnails
+    // are enabled in the preview, without needing a real file on disk.
+    {
+        const QString samplePath = QDir::cleanPath(
+            QDir(QDir::rootPath()).filePath(QStringLiteral("assets/sample.jpg")));
+        QPixmap samplePixmap(QStringLiteral(":/assets/sample.jpg"));
+        if (!samplePixmap.isNull()) {
+            const qsizetype bytes = (qsizetype)samplePixmap.width() * samplePixmap.height()
+                                    * samplePixmap.depth() / 8;
+            m_previewWidget->m_thumbnailStore.insert(samplePath, samplePixmap);
+            m_previewWidget->m_thumbnailBytes.insert(samplePath, bytes);
+            m_previewWidget->m_thumbnailTotalBytes += bytes;
+            m_previewWidget->m_thumbnailLastAccess.insert(samplePath, 1);
+            m_previewWidget->m_thumbnailReadyTimes.insert(samplePath, 0);
+        }
+    }
 
     auto* appearancePage = new QWidget(this);
     auto* appearanceLayout = new QVBoxLayout(appearancePage);
@@ -617,9 +648,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     motionForm->addRow(tr("Wheel zoom step"),
                        createFieldWithDescription(m_wheelZoomStepPercent,
                            tr("Scale change applied for each wheel step. Higher values zoom faster.")));
-    motionForm->addRow(tr("Zoom optimisation"),
-                       createFieldWithDescription(m_fastWheelZoom, QString()));
-    motionForm->addRow(QString(), m_trackpadScrollPans);
+    motionForm->addRow(m_trackpadScrollPans);
     appearanceControlsLayout->addWidget(createSectionGroup(
         tr("Animation timing"),
         tr("Set zoom and camera animation speed."),
@@ -808,6 +837,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     navigationForm->addRow(tr("Camera max scale"),
                            createFieldWithDescription(cameraMaxScaleRow,
                                tr("Maximum allowed camera zoom level.")));
+    navigationForm->addRow(createFieldWithDescription(m_fastWheelZoom, QString()));
     performanceLayout->addWidget(createSectionGroup(
         tr("Navigation"),
         tr("Set the maximum camera zoom level."),
@@ -981,6 +1011,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     connect(m_revealFadeHeight, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &SettingsDialog::refreshPreview);
     connect(m_revealFadeWidth, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &SettingsDialog::refreshPreview);
     connect(m_simpleTooltips, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
+    connect(m_showThumbnails, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
+    connect(m_thumbnailFitMode, &QComboBox::currentIndexChanged, this, &SettingsDialog::refreshPreview);
     connect(m_cameraMaxScale, &QSlider::valueChanged, this, [this](int value) {
         m_cameraMaxScaleValue->setText(QString::number(value));
         refreshPreview();
@@ -1093,6 +1125,45 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
         syncFileTypeGroupFromFields(m_fileTypeGroupsList->currentRow());
     });
 
+    // ── Previews page ────────────────────────────────────────────────────────
+    auto* previewsPage = new QWidget(this);
+    auto* previewsLayout = new QVBoxLayout(previewsPage);
+    previewsLayout->setContentsMargins(4, 10, 0, 10);
+    previewsLayout->setSpacing(16);
+    previewsLayout->addWidget(createPageIntro(
+        tr("Previews"),
+        tr("Control image thumbnail generation and memory usage.")));
+
+    auto* thumbnailsForm = new QFormLayout();
+    thumbnailsForm->addRow(m_showThumbnails);
+    thumbnailsForm->addRow(tr("Fit mode"), m_thumbnailFitMode);
+    thumbnailsForm->addRow(tr("Preview resolution"),
+                           createFieldWithDescription(m_thumbnailResolution,
+                               tr("Maximum dimension used when decoding images. Higher values use more memory and take longer to load.")));
+    thumbnailsForm->addRow(tr("Minimum tile size"),
+                           createFieldWithDescription(m_thumbnailMinTileSize,
+                               tr("Thumbnails are only shown when a tile is at least this many pixels wide or tall.")));
+    previewsLayout->addWidget(createSectionGroup(
+        tr("Image previews"),
+        QString(),
+        thumbnailsForm));
+
+    auto* thumbnailLimitsForm = new QFormLayout();
+    thumbnailLimitsForm->addRow(tr("Memory limit"),
+                                createFieldWithDescription(m_thumbnailMemoryLimitMB,
+                                    tr("Maximum memory used for decoded thumbnails. Least-recently-used images are evicted when this limit is exceeded.")));
+    thumbnailLimitsForm->addRow(tr("Maximum source file size"),
+                                createFieldWithDescription(m_thumbnailMaxFileSizeMB,
+                                    tr("Skip generating thumbnails for files larger than this. Set to zero to decode files of any size.")));
+    thumbnailLimitsForm->addRow(m_thumbnailSkipNetworkPaths);
+    previewsLayout->addWidget(createSectionGroup(
+        tr("Limits"),
+        tr("Control which files are decoded and how much memory is used."),
+        thumbnailLimitsForm));
+
+    previewsLayout->addStretch();
+    auto* previewsScroll = createSettingsPageScrollArea(previewsPage, this);
+
     auto* sectionNav = new QWidget(this);
     sectionNav->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
     sectionNav->setMinimumWidth(132);
@@ -1106,11 +1177,12 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     };
 
     auto* pages = new QStackedWidget(this);
-    pages->addWidget(appearanceContainer);
-    pages->addWidget(colorsContainer);
-    pages->addWidget(fileTypesContainer);
-    pages->addWidget(performanceContainer);
-    pages->addWidget(exclusionsScroll);
+    pages->addWidget(appearanceContainer);  // 0
+    pages->addWidget(colorsContainer);      // 1
+    pages->addWidget(fileTypesContainer);   // 2
+    pages->addWidget(previewsScroll);       // 3
+    pages->addWidget(performanceContainer); // 4
+    pages->addWidget(exclusionsScroll);     // 5
     connect(pages, &QStackedWidget::currentChanged, this, [pages](int index) {
         QWidget* page = pages->widget(index);
         auto* scrollArea = dynamic_cast<SettingsPageScrollArea*>(page);
@@ -1157,17 +1229,23 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
             QStringLiteral(":/assets/tabler-icons/files.svg")),
         2);
     addSectionButton(
+        tr("Previews"),
+        makeSectionIcon({"image-x-generic"},
+            QStringLiteral(":/assets/tabler-icons/photo.svg"),
+            QStringLiteral(":/assets/tabler-icons/photo.svg")),
+        3);
+    addSectionButton(
         tr("Performance"),
         makeSectionIcon({"preferences-system-performance"},
             QStringLiteral(":/assets/tabler-icons/brand-speedtest.svg"),
             QStringLiteral(":/assets/tabler-icons/brand-speedtest.svg")),
-        3);
+        4);
     addSectionButton(
         tr("Exclusions"),
         makeSectionIcon({"folder-blacklist", "folder"},
             QStringLiteral(":/assets/tabler-icons/folders-off.svg"),
             QStringLiteral(":/assets/tabler-icons/folders-off.svg")),
-        4);
+        5);
     appearanceButton->setChecked(true);
     sectionNavLayout->addStretch(1);
 
@@ -1469,6 +1547,13 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_fastWheelZoom->setChecked(settings.fastWheelZoom);
     m_trackpadScrollPans->setChecked(settings.trackpadScrollPans);
     m_simpleTooltips->setChecked(settings.simpleTooltips);
+    m_showThumbnails->setChecked(settings.showThumbnails);
+    m_thumbnailFitMode->setCurrentIndex(m_thumbnailFitMode->findData(settings.thumbnailFitMode));
+    m_thumbnailResolution->setValue(settings.thumbnailResolution);
+    m_thumbnailMinTileSize->setValue(settings.thumbnailMinTileSize);
+    m_thumbnailMemoryLimitMB->setValue(settings.thumbnailMemoryLimitMB);
+    m_thumbnailMaxFileSizeMB->setValue(settings.thumbnailMaxFileSizeMB);
+    m_thumbnailSkipNetworkPaths->setChecked(settings.thumbnailSkipNetworkPaths);
     m_cameraMaxScale->setValue(static_cast<int>(std::round(settings.cameraMaxScale)));
     m_cameraMaxScaleValue->setText(QString::number(static_cast<int>(std::round(settings.cameraMaxScale))));
     m_liveScanPreview->setChecked(settings.liveScanPreview);
@@ -1527,6 +1612,13 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.fastWheelZoom = m_fastWheelZoom->isChecked();
     currentSettings.trackpadScrollPans = m_trackpadScrollPans->isChecked();
     currentSettings.simpleTooltips = m_simpleTooltips->isChecked();
+    currentSettings.showThumbnails = m_showThumbnails->isChecked();
+    currentSettings.thumbnailFitMode = m_thumbnailFitMode->currentData().toInt();
+    currentSettings.thumbnailResolution = m_thumbnailResolution->value();
+    currentSettings.thumbnailMinTileSize = m_thumbnailMinTileSize->value();
+    currentSettings.thumbnailMemoryLimitMB = m_thumbnailMemoryLimitMB->value();
+    currentSettings.thumbnailMaxFileSizeMB = m_thumbnailMaxFileSizeMB->value();
+    currentSettings.thumbnailSkipNetworkPaths = m_thumbnailSkipNetworkPaths->isChecked();
     currentSettings.cameraMaxScale = m_cameraMaxScale->value();
     currentSettings.liveScanPreview = m_liveScanPreview->isChecked();
     currentSettings.randomColorForUnknownFiles = m_randomColorForUnknownFiles->isChecked();
@@ -1602,7 +1694,7 @@ void SettingsDialog::buildPreviewTree()
     createPreviewNode(m_previewArena, "media", 145, true, 0, assets);
     createPreviewNode(m_previewArena, "icons", 90, true, 0, assets);
     createPreviewNode(m_previewArena, "textures", 70, true, 0, assets);
-    createPreviewNode(m_previewArena, "hero.png", 55, false, qRgb(190, 96, 96), assets);
+    createPreviewNode(m_previewArena, "sample.jpg", 200, false, qRgb(190, 96, 96), assets);
     createPreviewNode(m_previewArena, "sprite.odd", 24, false, qRgb(128, 128, 128), assets);
 
     createPreviewNode(m_previewArena, "logs", 110, true, 0, system);

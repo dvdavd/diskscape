@@ -5,6 +5,17 @@
 #include "colorutils.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
+#include <QThreadPool>
+#include <QCryptographicHash>
+#include <QDateTime>
+#include <QImageReader>
+#include <QStandardPaths>
+#include <QStorageInfo>
+#include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <QCoreApplication>
+#include <QTimer>
 #include <QCursor>
 #include <QFileInfo>
 #include <QFileIconProvider>
@@ -219,6 +230,104 @@ private:
 };
 
 namespace {
+
+class ThumbnailTask : public QRunnable {
+public:
+    ThumbnailTask(const QString& path, TreemapWidget* widget,
+                  int resolution, int maxFileSizeMB, bool skipNetworkPaths)
+        : m_path(path), m_widget(widget),
+          m_resolution(resolution),
+          m_maxFileSizeMB(maxFileSizeMB),
+          m_skipNetworkPaths(skipNetworkPaths)
+    {
+        setAutoDelete(true);
+    }
+
+    void run() override {
+        // Network path check
+        if (m_skipNetworkPaths) {
+            const QByteArray dev = QStorageInfo(m_path).device();
+            const bool isLocal = dev.startsWith('/') && !dev.startsWith("//");
+            if (!isLocal) {
+                QMetaObject::invokeMethod(m_widget, [widget = m_widget, path = m_path]() {
+                    widget->m_pendingThumbnails.remove(path);
+                }, Qt::QueuedConnection);
+                return;
+            }
+        }
+
+        // File size check
+        if (m_maxFileSizeMB > 0) {
+            const qint64 limit = (qint64)m_maxFileSizeMB * 1024 * 1024;
+            if (QFileInfo(m_path).size() > limit) {
+                QMetaObject::invokeMethod(m_widget, [widget = m_widget, path = m_path]() {
+                    widget->m_pendingThumbnails.remove(path);
+                }, Qt::QueuedConnection);
+                return;
+            }
+        }
+
+        const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QLatin1String("/thumbnails");
+        QDir().mkpath(cacheDir);
+
+        QCryptographicHash hasher(QCryptographicHash::Sha256);
+        hasher.addData(m_path.toUtf8());
+        hasher.addData(QByteArray::number(m_resolution));
+        const QString hash = hasher.result().toHex();
+        const QString cachedPath = cacheDir + QLatin1Char('/') + hash + QLatin1String(".jpg");
+
+        QImage image;
+        if (QFileInfo::exists(cachedPath)) {
+            image.load(cachedPath);
+        } else {
+            QImageReader reader(m_path);
+            if (!reader.canRead()) {
+                QMetaObject::invokeMethod(m_widget, [widget = m_widget, path = m_path]() {
+                    widget->m_pendingThumbnails.remove(path);
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            const QSize size = reader.size();
+            if (size.isValid()) {
+                const QSize targetSize(m_resolution, m_resolution);
+                if (size.width() > targetSize.width() || size.height() > targetSize.height()) {
+                    reader.setScaledSize(size.scaled(targetSize, Qt::KeepAspectRatio));
+                }
+            }
+
+            image = reader.read();
+            if (!image.isNull()) {
+                image.save(cachedPath, "JPG");
+            }
+        }
+
+        if (!image.isNull()) {
+            QPixmap pixmap = QPixmap::fromImage(image);
+            QMetaObject::invokeMethod(m_widget, [widget = m_widget, path = m_path, p = std::move(pixmap)]() mutable {
+                const qsizetype bytes = (qsizetype)p.width() * p.height() * p.depth() / 8;
+                widget->m_thumbnailStore.insert(path, p);
+                widget->m_thumbnailBytes.insert(path, bytes);
+                widget->m_thumbnailTotalBytes += bytes;
+                widget->m_thumbnailLastAccess.insert(path, ++widget->m_thumbnailAccessSeq);
+                widget->m_pendingThumbnails.remove(path);
+                widget->m_thumbnailReadyTimes.insert(path, QDateTime::currentMSecsSinceEpoch());
+                widget->viewport()->update();
+            }, Qt::QueuedConnection);
+        } else {
+            QMetaObject::invokeMethod(m_widget, [widget = m_widget, path = m_path]() {
+                widget->m_pendingThumbnails.remove(path);
+            }, Qt::QueuedConnection);
+        }
+    }
+
+private:
+    QString m_path;
+    TreemapWidget* m_widget;
+    int m_resolution;
+    int m_maxFileSizeMB;
+    bool m_skipNetworkPaths;
+};
 
 constexpr quint8 kSearchSelfMatch = 0x1;
 constexpr quint8 kSearchSubtreeMatch = 0x2;
@@ -870,6 +979,7 @@ void TreemapWidget::applySettings(const TreemapSettings& settings)
     m_stableMetricCache.clear();
     m_headerLabelVisibleCache.clear();
     m_fileLabelVisibleCache.clear();
+    m_thumbnailStableSizeCache.clear();
     m_fileSizeLabelVisibleCache.clear();
     m_activeSemanticDepth = std::clamp(m_activeSemanticDepth,
                                        m_settings.baseVisibleDepth,
@@ -1077,6 +1187,7 @@ void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena
     m_stableMetricCache.clear();
     m_headerLabelVisibleCache.clear();
     m_fileLabelVisibleCache.clear();
+    m_thumbnailStableSizeCache.clear();
     m_fileSizeLabelVisibleCache.clear();
     auto oldSearchMatchCache = std::move(m_searchMatchCache);
     m_searchMatchCache = {};
@@ -1477,6 +1588,32 @@ void TreemapWidget::updateOwnedTooltipLayoutDirection()
     m_hoverTooltipTextLabel->setAlignment(textAlignment);
     m_hoverTooltipSizeLabel->setAlignment(textAlignment);
     m_hoverTooltipStatsLabel->setAlignment(textAlignment);
+}
+
+void TreemapWidget::pruneThumbnailCache()
+{
+    const qsizetype kBudget = (qsizetype)m_settings.thumbnailMemoryLimitMB * 1024 * 1024;
+    if (m_thumbnailTotalBytes <= kBudget)
+        return;
+
+    // Build an eviction list of unpinned entries, oldest access first.
+    QList<std::pair<quint64, QString>> candidates;
+    candidates.reserve(m_thumbnailStore.size());
+    for (auto it = m_thumbnailStore.keyBegin(); it != m_thumbnailStore.keyEnd(); ++it) {
+        if (!m_thumbnailFramePinSet.contains(*it))
+            candidates.append({m_thumbnailLastAccess.value(*it, 0), *it});
+    }
+    std::sort(candidates.begin(), candidates.end());
+
+    for (auto& [seq, path] : candidates) {
+        if (m_thumbnailTotalBytes <= kBudget)
+            break;
+        m_thumbnailTotalBytes -= m_thumbnailBytes.value(path, 0);
+        m_thumbnailStore.remove(path);
+        m_thumbnailBytes.remove(path);
+        m_thumbnailLastAccess.remove(path);
+        m_thumbnailReadyTimes.remove(path);
+    }
 }
 
 QIcon TreemapWidget::fallbackTooltipIcon(bool isDirectory) const
@@ -2427,6 +2564,7 @@ void TreemapWidget::notifyTreeChanged()
     m_stableMetricCache.clear();
     m_headerLabelVisibleCache.clear();
     m_fileLabelVisibleCache.clear();
+    m_thumbnailStableSizeCache.clear();
     m_fileSizeLabelVisibleCache.clear();
     cancelPendingSearch();
     m_searchMatchCache = {};
@@ -4108,6 +4246,85 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             p.fillRect(ri, fillColor);
         }
 
+        static QSet<uint64_t> imageExtKeys;
+        static bool initialized = false;
+        if (!initialized) {
+            for (const QByteArray& fmt : QImageReader::supportedImageFormats()) {
+                // packFileExt expects a filename with a dot; pass it a dummy one.
+                imageExtKeys.insert(ColorUtils::packFileExt(QLatin1String("f.") + QString::fromLatin1(fmt).toLower()));
+            }
+            // Explicitly add common formats just in case they're missing or aliased
+            static const char* common[] = {"jpg", "jpeg", "png", "gif", "webp", "tiff", "bmp", "ico", "svg"};
+            for (const char* ext : common) {
+                imageExtKeys.insert(ColorUtils::packFileExt(QLatin1String("f.") + QLatin1String(ext)));
+            }
+            initialized = true;
+        }
+
+        qreal finalThumbnailAlpha = 0.0;
+        const qreal thumbFullSize = std::max<qreal>(1.0, m_settings.thumbnailMinTileSize);
+        const qreal thumbFadeDistance = 8.0;
+        const qreal thumbStartSize = std::max<qreal>(1.0, thumbFullSize - thumbFadeDistance);
+        const QSizeF currentThumbnailSize(ri.width(), ri.height());
+        const QSizeF previousThumbnailSize = m_thumbnailStableSizeCache.value(node, currentThumbnailSize);
+        const QSizeF stableThumbnailSize = applyAxisHysteresis(
+            currentThumbnailSize, previousThumbnailSize, thumbFadeDistance);
+        const qreal thumbnailRevealOpacity = revealOpacityForSize(
+            stableThumbnailSize,
+            thumbStartSize,
+            thumbStartSize,
+            thumbFullSize,
+            thumbFullSize);
+        m_thumbnailStableSizeCache.insert(node, stableThumbnailSize);
+        if (m_settings.showThumbnails && thumbnailRevealOpacity > 0.0 && imageExtKeys.contains(node->extKey)) {
+            const QString path = node->computePath();
+            if (!path.isEmpty()) {
+                auto storeIt = m_thumbnailStore.find(path);
+                if (storeIt != m_thumbnailStore.end()) {
+                    m_thumbnailLastAccess[path] = ++m_thumbnailAccessSeq;
+                    m_thumbnailFramePinSet.insert(path);
+                    const QPixmap& pixmap = storeIt.value();
+                    const qint64 readyTime = m_thumbnailReadyTimes.value(path, 0);
+                    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+                    const qreal loadAlpha = std::clamp((now - readyTime) / 300.0, 0.0, 1.0);
+                    finalThumbnailAlpha = loadAlpha * thumbnailRevealOpacity;
+
+                    if (finalThumbnailAlpha > 0.0) {
+                        p.save();
+                        p.setOpacity(baseOpacity * tileRevealOpacity * finalThumbnailAlpha);
+                        const QSize imgSize = pixmap.size();
+                        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                        const int fitMode = m_settings.thumbnailFitMode;
+                        if (fitMode == TreemapSettings::ThumbnailFill) {
+                            QSizeF scaledSize = QSizeF(imgSize).scaled(ri.size(), Qt::KeepAspectRatioByExpanding);
+                            QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
+                            imgRect.moveCenter(ri.center());
+                            p.setClipRect(ri);
+                            p.drawPixmap(imgRect, pixmap, pixmap.rect());
+                        } else if (fitMode == TreemapSettings::ThumbnailFit) {
+                            QSizeF scaledSize = QSizeF(imgSize).scaled(ri.size(), Qt::KeepAspectRatio);
+                            QRectF imgRect(0, 0, scaledSize.width(), scaledSize.height());
+                            imgRect.moveCenter(ri.center());
+                            p.drawPixmap(imgRect, pixmap, pixmap.rect());
+                        } else {
+                            p.drawPixmap(ri, pixmap, pixmap.rect());
+                        }
+                        p.restore();
+                    }
+                    if (loadAlpha < 1.0) {
+                        QTimer::singleShot(16, this, [this]() { viewport()->update(); });
+                    }
+                } else if (!m_pendingThumbnails.contains(path)) {
+                    m_pendingThumbnails.insert(path);
+                    QThreadPool::globalInstance()->start(new ThumbnailTask(
+                        path, this,
+                        m_settings.thumbnailResolution,
+                        m_settings.thumbnailMaxFileSizeMB,
+                        m_settings.thumbnailSkipNetworkPaths));
+                }
+            }
+        }
+
         if (outlineWidth > 0.0) {
             const qreal clampedBorderIntensity = std::clamp(m_settings.borderIntensity, 0.0, 1.0);
             const bool useLightFileBorder = shouldUseLightBorder(fc, m_settings.borderStyle);
@@ -4119,7 +4336,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                 vibrantFileTarget.setHslF(h, boostedS, useLightFileBorder ? 0.92f : 0.10f, a);
             }
             const QColor fileBorderBase = blendColors(fc, vibrantFileTarget, clampedBorderIntensity);
-            
+
             const QColor highlightBorderBase = hoverBase;
             const QColor fileBorderColor = bgHighlightStrength > 0.0
                 ? blendColors(fileBorderBase, highlightBorderBase, bgHighlightStrength)
@@ -4171,9 +4388,11 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             // file p.save()/p.restore() already guards all state for the caller.
             const QColor baseContrast = contrastingTextColor(fc);
             const QColor hoverContrast = contrastingTextColor(hoverBase);
-            const QColor fileTextColor = bgHighlightStrength > 0.0
+            const QColor rawFileTextColor = bgHighlightStrength > 0.0
                 ? blendColors(baseContrast, hoverContrast, bgHighlightStrength)
                 : baseContrast;
+
+            const QColor fileTextColor = finalThumbnailAlpha > 0.4 ? Qt::white : rawFileTextColor;
 
             p.setOpacity(baseOpacity * tileRevealOpacity * textFade);
             p.setPen(fileTextColor);
@@ -4204,6 +4423,35 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             const qreal sizeHeightFade = smoothstep(std::clamp(
                 (stableTwoLineHeight - sizeHideHeight) / sizeHeightSpan, 0.0, 1.0));
             const qreal sizeFade = std::min(sizeWidthFade, sizeHeightFade);
+
+            if (finalThumbnailAlpha > 0.1) {
+                const qreal bgAlpha = std::clamp(finalThumbnailAlpha, 0.0, 1.0) * 0.7;
+                p.save();
+                p.setOpacity(baseOpacity * tileRevealOpacity * textFade * bgAlpha);
+
+                const qreal totalTextHeight = (sizeFade > 0.0) 
+                    ? (m_fileFm.height() + m_fileFm.lineSpacing())
+                    : m_fileFm.height();
+
+                const int nameW = m_fileFm.horizontalAdvance(nameText);
+                int totalW = nameW;
+                if (sizeFade > 0.0) {
+                    const QString sizeText = cachedElidedLabelWithBucket(
+                        node, cachedSizeLabel(node), textWidth, m_fileFm, 3, kFileElideBucketPx,
+                        layoutDirection());
+                    totalW = std::max(totalW, m_fileFm.horizontalAdvance(sizeText));
+                }
+
+                // Flush with the inner border edge so the fill doesn't overlap the tile border.
+                const QRectF bgRect(
+                    ri.left() + outlineWidth,
+                    ri.top() + outlineWidth,
+                    std::min<qreal>(ri.width() - outlineWidth, totalW + 8.0),
+                    std::min<qreal>(ri.height() - outlineWidth, totalTextHeight + 4.0));
+
+                p.fillRect(bgRect, QColor(0, 0, 0, 180));
+                p.restore();
+            }
             if (sizeFade > 0.0) {
                 const QString sizeText = cachedElidedLabelWithBucket(
                     node, cachedSizeLabel(node), textWidth, m_fileFm, 3, kFileElideBucketPx,
@@ -4594,10 +4842,12 @@ void TreemapWidget::paintEvent(QPaintEvent* event)
             m_liveFrame.setDevicePixelRatio(dpr);
             m_liveFrameDeviceSize = deviceSize;
         }
+        m_thumbnailFramePinSet.clear();
         QPainter lp(&m_liveFrame);
         lp.setRenderHint(QPainter::Antialiasing, false);
         drawScene(lp, m_current, QRectF(viewport()->rect()));
         drawMatchOverlay(lp, m_current, QRectF(viewport()->rect()));
+        pruneThumbnailCache();
     } else if (!dirty.isEmpty()) {
         // Partial update for hover etc
         QPainter lp(&m_liveFrame);

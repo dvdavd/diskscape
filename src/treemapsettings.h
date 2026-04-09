@@ -130,6 +130,19 @@ struct TreemapSettings {
     bool enableScanActivityTracking = true;
     bool hideNonLocalFreeSpace = false;
     bool limitToSameFilesystem = false;
+    enum ThumbnailFitMode {
+        ThumbnailFill = 0,    // crop to fill tile, keep AR
+        ThumbnailFit = 1,     // letterbox, keep AR
+        ThumbnailStretch = 2, // stretch, ignore AR
+    };
+
+    bool showThumbnails = false;
+    int thumbnailResolution = 256;
+    int thumbnailMinTileSize = 80;
+    int thumbnailMemoryLimitMB = 256;
+    int thumbnailMaxFileSizeMB = 50;
+    bool thumbnailSkipNetworkPaths = true;
+    int thumbnailFitMode = ThumbnailFill;
     QStringList excludedPaths;
     QList<FileTypeGroup> fileTypeGroups;
     QList<TreemapColorTheme> colorThemes;

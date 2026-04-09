@@ -579,6 +579,13 @@ TreemapSettings TreemapSettings::load(QSettings& store)
     settings.liveScanPreview = store.value("treemap/liveScanPreview", settings.liveScanPreview).toBool();
     settings.simpleTooltips = store.value("treemap/simpleTooltips", settings.simpleTooltips).toBool();
     settings.hideNonLocalFreeSpace = store.value("treemap/hideNonLocalFreeSpace", settings.hideNonLocalFreeSpace).toBool();
+    settings.showThumbnails = store.value("treemap/showThumbnails", settings.showThumbnails).toBool();
+    settings.thumbnailResolution = store.value("treemap/thumbnailResolution", settings.thumbnailResolution).toInt();
+    settings.thumbnailMinTileSize = store.value("treemap/thumbnailMinTileSize", settings.thumbnailMinTileSize).toInt();
+    settings.thumbnailMemoryLimitMB = store.value("treemap/thumbnailMemoryLimitMB", settings.thumbnailMemoryLimitMB).toInt();
+    settings.thumbnailMaxFileSizeMB = store.value("treemap/thumbnailMaxFileSizeMB", settings.thumbnailMaxFileSizeMB).toInt();
+    settings.thumbnailSkipNetworkPaths = store.value("treemap/thumbnailSkipNetworkPaths", settings.thumbnailSkipNetworkPaths).toBool();
+    settings.thumbnailFitMode = store.value("treemap/thumbnailFitMode", settings.thumbnailFitMode).toInt();
     settings.excludedPaths = store.value("treemap/excludedPaths", settings.excludedPaths).toStringList();
     settings.activeColorThemeId = store.value("treemap/activeColorThemeId", settings.activeColorThemeId).toString();
     settings.lightModeColorThemeId = store.value("treemap/lightModeColorThemeId", settings.lightModeColorThemeId).toString();
@@ -740,6 +747,13 @@ void TreemapSettings::save(QSettings& store) const
     store.setValue("treemap/liveScanPreview", snapshot.liveScanPreview);
     store.setValue("treemap/simpleTooltips", snapshot.simpleTooltips);
     store.setValue("treemap/hideNonLocalFreeSpace", snapshot.hideNonLocalFreeSpace);
+    store.setValue("treemap/showThumbnails", snapshot.showThumbnails);
+    store.setValue("treemap/thumbnailResolution", snapshot.thumbnailResolution);
+    store.setValue("treemap/thumbnailMinTileSize", snapshot.thumbnailMinTileSize);
+    store.setValue("treemap/thumbnailMemoryLimitMB", snapshot.thumbnailMemoryLimitMB);
+    store.setValue("treemap/thumbnailMaxFileSizeMB", snapshot.thumbnailMaxFileSizeMB);
+    store.setValue("treemap/thumbnailSkipNetworkPaths", snapshot.thumbnailSkipNetworkPaths);
+    store.setValue("treemap/thumbnailFitMode", snapshot.thumbnailFitMode);
     store.setValue("treemap/excludedPaths", snapshot.excludedPaths);
     store.setValue("treemap/activeColorThemeId", snapshot.activeColorThemeId);
     store.setValue("treemap/lightModeColorThemeId", snapshot.lightModeColorThemeId);

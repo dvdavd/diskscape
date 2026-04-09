@@ -23,6 +23,7 @@
 #include <QString>
 #include <QTimer>
 #include <QVariantAnimation>
+#include <QSet>
 #include <QWidget>
 #include <atomic>
 #include <functional>
@@ -74,6 +75,7 @@ struct TooltipIconResult {
 
 class TreemapWidget : public QAbstractScrollArea {
     Q_OBJECT
+    friend class ThumbnailTask;
 
 public:
     struct ViewState {
@@ -260,6 +262,7 @@ private:
     void updateOwnedTooltipLayoutDirection();
     QIcon fallbackTooltipIcon(bool isDirectory) const;
     void requestTooltipIcon(const QString& path, bool isDirectory);
+    void pruneThumbnailCache();
     void positionOwnedTooltip(const QPoint& globalPos);
     void showOwnedTooltip(const QPoint& globalPos, FileNode* node, const QString& text,
                           double parentPercent, double rootPercent);
@@ -429,6 +432,7 @@ private:
     mutable QHash<quint64, QSizeF> m_stableMetricCache;
     mutable QHash<const FileNode*, bool> m_headerLabelVisibleCache;
     mutable QHash<const FileNode*, bool> m_fileLabelVisibleCache;
+    mutable QHash<const FileNode*, QSizeF> m_thumbnailStableSizeCache;
     mutable QHash<const FileNode*, bool> m_fileSizeLabelVisibleCache;
     std::vector<uint8_t> m_searchMatchCache;   // indexed by FileNode::id, written on main thread
     uint32_t m_nodeCount = 0;
@@ -451,6 +455,17 @@ private:
     bool m_pendingTooltipIconIsDirectory = false;
     bool m_tooltipIconLoadQueued = false;
 
+public:
+    QHash<QString, QPixmap> m_thumbnailStore;
+    QHash<QString, qsizetype> m_thumbnailBytes;
+    QHash<QString, quint64> m_thumbnailLastAccess;
+    QSet<QString> m_thumbnailFramePinSet;
+    qsizetype m_thumbnailTotalBytes = 0;
+    quint64 m_thumbnailAccessSeq = 0;
+    QSet<QString> m_pendingThumbnails;
+    QHash<QString, qint64> m_thumbnailReadyTimes;
+
+private:
     uint8_t searchMatchFlags(const FileNode* n) const {
         if (m_searchMatchCache.empty()) return 0;
         return (n && n->id < m_searchMatchCache.size()) ? m_searchMatchCache[n->id] : 0;

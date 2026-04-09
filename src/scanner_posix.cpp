@@ -511,6 +511,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 }
                 const qint64 provisionalSize = r.placeholder->size;
                 r.placeholder->size = r.workerRoot->size;
+                r.placeholder->subtreeFileCount = r.workerRoot->subtreeFileCount;
                 r.placeholder->children = std::move(r.workerRoot->children);
                 for (FileNode* child : r.placeholder->children) {
                     child->parent = r.placeholder;

@@ -125,6 +125,13 @@ private:
     QCheckBox* m_fastWheelZoom = nullptr;
     QCheckBox* m_trackpadScrollPans = nullptr;
     QCheckBox* m_simpleTooltips = nullptr;
+    QCheckBox* m_showThumbnails = nullptr;
+    QComboBox* m_thumbnailFitMode = nullptr;
+    QSpinBox* m_thumbnailResolution = nullptr;
+    QSpinBox* m_thumbnailMinTileSize = nullptr;
+    QSpinBox* m_thumbnailMemoryLimitMB = nullptr;
+    QSpinBox* m_thumbnailMaxFileSizeMB = nullptr;
+    QCheckBox* m_thumbnailSkipNetworkPaths = nullptr;
     QSlider* m_cameraMaxScale = nullptr;
     QLabel* m_cameraMaxScaleValue = nullptr;
     QCheckBox* m_liveScanPreview = nullptr;
