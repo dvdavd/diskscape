@@ -73,9 +73,12 @@ struct TooltipIconResult {
     QIcon icon;
 };
 
+enum class SceneRenderLayer { All, StaticOnly, DynamicOnly };
+
 class TreemapWidget : public QAbstractScrollArea {
     Q_OBJECT
     friend class ThumbnailTask;
+    friend class FullImageTask;
 
 public:
     struct ViewState {
@@ -120,6 +123,9 @@ public:
     qreal cameraScale() const { return m_cameraScale; }
     ViewState currentViewState() const;
     ViewState overviewViewState(FileNode* node = nullptr) const;
+    bool hasOpenImagePreview() const { return m_imagePreviewNode != nullptr || m_imagePreviewProgress > 0.0; }
+    void closeImagePreviewFromNavigation();
+    void applyLoadedImagePreview(const QString& path, const QImage& image);
 
 signals:
     void nodeActivated(FileNode* node);
@@ -140,6 +146,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void leaveEvent(QEvent* event) override;
@@ -152,6 +159,7 @@ private:
         HeaderLabel = 2,
         FileLabel = 3,
         FolderDetail = 4,
+        ThumbnailReveal = 5,
     };
 
     struct DirectoryRenderState {
@@ -207,7 +215,8 @@ private:
                          bool useFocusAnchor = false);
     void setCameraImmediate(qreal scale, const QPointF& origin);
     void resetCamera();
-    void drawScene(QPainter& painter, FileNode* root, const QRectF& visibleClip = QRectF());
+    void drawScene(QPainter& painter, FileNode* root, const QRectF& visibleClip = QRectF(),
+                   SceneRenderLayer layer = SceneRenderLayer::All);
     void drawSceneScaled(QPainter& painter, FileNode* root, const QRectF& targetRect, qreal opacity = 1.0);
     void drawMatchOverlay(QPainter& painter, FileNode* root,
                           const QRectF& visibleClip = QRectF());
@@ -236,7 +245,8 @@ private:
     void paintNode(QPainter& painter, FileNode* node, int depth,
                    const QRectF& visibleClip, const QRectF& viewRect,
                    qreal subtreeHoverBlend = 0.0, qreal subtreePrevHoverBlend = 0.0,
-                   bool applyOwnReveal = true);
+                   bool applyOwnReveal = true,
+                   SceneRenderLayer layer = SceneRenderLayer::All);
     void paintMatchOverlayNode(QPainter& painter, FileNode* node, int depth,
                                const QRectF& visibleClip, const QRectF& viewRect) const;
     void paintMatchBordersNode(QPainter& painter, FileNode* node, int depth,
@@ -284,6 +294,15 @@ private:
     void updateTouchGesture(const QList<QEventPoint>& points);
     void endTouchGesture();
     void activateTouchTap(const QPointF& pos);
+    bool nodeSupportsImagePreview(const FileNode* node) const;
+    QRectF imagePreviewSourceRectForNode(const FileNode* node) const;
+    QSize imagePreviewBaseImageSize() const;
+    qreal imagePreviewBaseOpacity() const;
+    QRectF imagePreviewTargetRect() const;
+    void requestImagePreview(FileNode* node, const QRectF& sourceRect);
+    void closeImagePreview(bool animated = true);
+    void clearImagePreview();
+    void paintImagePreviewOverlay(QPainter& painter);
 
     bool continuousZoomGeometryActive() const;
 
@@ -313,6 +332,7 @@ private:
     QVariantAnimation m_zoomAnimation;
     QVariantAnimation m_layoutAnimation;
     QVariantAnimation m_cameraAnimation;
+    QVariantAnimation m_imagePreviewAnimation;
     QPixmap m_previousFrame;
     QPixmap m_nextFrame;
     QPixmap m_layoutPreviousFrame;
@@ -320,6 +340,8 @@ private:
     QPixmap m_cameraPreviousFrame;
     QPixmap m_cameraNextFrame;
     QPixmap m_liveFrame;
+    QPixmap m_liveStaticFrame;
+    QPixmap m_liveDynamicFrame;
     QPixmap m_scrollBuffer;
     QSize   m_liveFrameDeviceSize;
     FileNode* m_lastLiveRoot = nullptr;
@@ -393,6 +415,13 @@ private:
     QString m_previousHighlightedFileType;
     QPointF m_lastActivationPos;
     bool m_contextMenuActive = false;
+    FileNode* m_imagePreviewNode = nullptr;
+    QString m_imagePreviewPath;
+    QRectF m_imagePreviewSourceRect;
+    QImage m_imagePreviewImage;
+    bool m_imagePreviewLoading = false;
+    bool m_imagePreviewOpening = false;
+    qreal m_imagePreviewProgress = 0.0;
     bool m_middlePanning = false;
     QPointF m_middlePanStartPos;
     QPointF m_middlePanStartOrigin;

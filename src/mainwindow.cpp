@@ -1667,6 +1667,24 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 
     if (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) {
         auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const bool hasPreview = m_treemapWidget && m_treemapWidget->hasOpenImagePreview();
+        const bool isBackKey = keyEvent->matches(QKeySequence::Back)
+            || keyEvent->key() == Qt::Key_Back
+            || keyEvent->key() == Qt::Key_Backspace
+            || (keyEvent->modifiers() == Qt::AltModifier && keyEvent->key() == Qt::Key_Left)
+            || keyEvent->key() == Qt::Key_Escape;
+        if (!keyEvent->isAutoRepeat() && hasPreview && isBackKey) {
+            if (event->type() == QEvent::ShortcutOverride) {
+                event->accept();
+                return true;
+            }
+
+            m_treemapWidget->closeImagePreviewFromNavigation();
+            updateNavigationActions();
+            event->accept();
+            return true;
+        }
+
         if (!keyEvent->isAutoRepeat() && keyEvent->key() == Qt::Key_Escape
                 && (m_scanInProgress || m_incrementalRefreshInProgress || m_postProcessInProgress)) {
             if (event->type() == QEvent::ShortcutOverride) {
@@ -2032,6 +2050,11 @@ void MainWindow::navigateBack()
 {
     if (m_scanInProgress && !m_backgroundRefreshInProgress)
         return;
+
+    if (m_treemapWidget && m_treemapWidget->hasOpenImagePreview()) {
+        m_treemapWidget->closeImagePreviewFromNavigation();
+        return;
+    }
 
     if (FileNode* current = m_treemapWidget->currentNode()) {
         const TreemapWidget::ViewState currentView = m_treemapWidget->currentViewState();
@@ -3366,7 +3389,8 @@ void MainWindow::updateNavigationActions()
 {
     FileNode* current = m_treemapWidget->currentNode();
     const bool navigationEnabled = !m_scanInProgress || m_backgroundRefreshInProgress;
-    m_backAction->setEnabled(navigationEnabled && !m_history.empty());
+    const bool previewOpen = m_treemapWidget && m_treemapWidget->hasOpenImagePreview();
+    m_backAction->setEnabled(navigationEnabled && (previewOpen || !m_history.empty()));
     m_upAction->setEnabled(navigationEnabled && current && current->parent != nullptr);
     if (m_zoomInAction) {
         m_zoomInAction->setEnabled(navigationEnabled && current);

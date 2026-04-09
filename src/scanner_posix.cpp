@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "scanner_common.h"
 #include "colorutils.h"
+#include "filesystemutils.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -564,12 +565,9 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
     // Primary filesystem entry
     QSet<QString> seenDevices;
     seenDevices.insert(storageInfo.device());
-    const auto isLocalDevice = [](const QByteArray& dev) {
-        return dev.startsWith('/') && !dev.startsWith("//");
-    };
     result.filesystems.push_back({primaryFsRoot, storageInfo.rootPath(),
                                    storageInfo.bytesFree(), storageInfo.bytesTotal(),
-                                   isLocalDevice(storageInfo.device())});
+                                   isLocalFilesystem(storageInfo)});
 
     for (const QStorageInfo& vol : QStorageInfo::mountedVolumes()) {
         if (!vol.isValid() || !vol.isReady())
@@ -601,7 +599,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         result.totalBytes += vol.bytesTotal();
         result.filesystems.push_back({volRoot, vol.rootPath(),
                                        vol.bytesFree(), vol.bytesTotal(),
-                                       isLocalDevice(vol.device())});
+                                       isLocalFilesystem(vol)});
     }
 
     emitProgress(result, path, progressReadyCallback, progressCallback, true);

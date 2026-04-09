@@ -470,18 +470,20 @@ private slots:
     void thumbnailRevealOpacity_respectsHysteresisBand()
     {
         const qreal fullSize = 80.0;
+        const qreal revealDistance = std::clamp(fullSize * 0.3, 16.0, 32.0);
         const qreal hysteresis = 8.0;
-        const qreal startSize = fullSize - hysteresis;
+        const qreal startSize = fullSize - revealDistance;
 
         const QSizeF shownSize(fullSize + 4.0, fullSize + 6.0);
-        const QSizeF jitteredSmallerSize(fullSize - 2.0, fullSize - 3.0);
+        const QSizeF jitteredSmallerSize(shownSize.width() - 6.0, shownSize.height() - 7.0);
         const QSizeF stableSize = applyAxisHysteresis(jitteredSmallerSize, shownSize, hysteresis);
         const qreal stableOpacity = revealOpacityForSize(
             stableSize, startSize, startSize, fullSize, fullSize);
         QCOMPARE(stableSize, shownSize);
         QCOMPARE(stableOpacity, 1.0);
 
-        const QSizeF clearlySmallerSize(startSize - 1.0, startSize - 1.0);
+        const QSizeF clearlySmallerSize(shownSize.width() - (hysteresis + 1.0),
+                                        shownSize.height() - (hysteresis + 1.0));
         const QSizeF updatedSize = applyAxisHysteresis(clearlySmallerSize, shownSize, hysteresis);
         const qreal updatedOpacity = revealOpacityForSize(
             updatedSize, startSize, startSize, fullSize, fullSize);

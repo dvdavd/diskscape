@@ -31,6 +31,8 @@ endif()
 
 qt_add_executable(diskscape
     src/main.cpp
+    src/filesystemutils.h
+    src/filesystemutils.cpp
     src/scanner.h
     ${SCANNER_BACKEND_SRC}
     src/filenode.h
@@ -128,6 +130,8 @@ endif()
 
 qt_add_executable(scanner_bench EXCLUDE_FROM_ALL
     src/scanner_bench.cpp
+    src/filesystemutils.h
+    src/filesystemutils.cpp
     src/scanner.h
     ${SCANNER_BACKEND_SRC}
     src/colorutils.h
@@ -207,13 +211,20 @@ set(DISKSCAPE_COLORUTILS_SRC
     src/colorutils.cpp
 )
 
+set(DISKSCAPE_FILESYSTEMUTILS_SRC
+    src/filesystemutils.h
+    src/filesystemutils.cpp
+)
+
 diskscape_add_test(test_settings
     tests/test_settings.cpp
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
     ${DISKSCAPE_SETTINGS_SRC}
 )
 
 diskscape_add_test(test_drawing
     tests/test_drawing.cpp
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
     src/filenode.h
     ${DISKSCAPE_SETTINGS_SRC}
     src/treemap_drawing.h
@@ -248,6 +259,7 @@ diskscape_add_test(test_icons
 
 diskscape_add_test(test_scanner
     tests/test_scanner.cpp
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
     src/scanner.h
     ${SCANNER_BACKEND_SRC}
     ${DISKSCAPE_SETTINGS_SRC}
@@ -255,6 +267,7 @@ diskscape_add_test(test_scanner
 )
 
 set(DISKSCAPE_WIDGET_SRC
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
     src/filenode.h
     src/mainwindow_utils.h
     src/mainwindow_utils.cpp
@@ -284,6 +297,11 @@ diskscape_add_test(test_breadcrumbpathbar
     src/breadcrumbpathbar.cpp
     src/iconutils.h
     ${DISKSCAPE_WIDGET_SRC}
+)
+
+diskscape_add_test(test_filesystemutils
+    tests/test_filesystemutils.cpp
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
 )
 
 endif() # BUILD_TESTING

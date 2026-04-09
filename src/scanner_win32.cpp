@@ -6,6 +6,7 @@
 
 #include "scanner_common.h"
 #include "colorutils.h"
+#include "filesystemutils.h"
 
 #include <QDir>
 #include <QFile>
@@ -91,18 +92,6 @@ DWORD getVolumeSerial(const std::wstring& win32Path)
     DWORD serial = 0;
     GetVolumeInformationW(volRoot, nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
     return serial;
-}
-
-// Returns true for locally-attached volumes (not network shares).
-bool isLocalWin32Volume(const QStorageInfo& vol)
-{
-    const QString fsType = vol.fileSystemType().toUpper();
-    if (fsType == QLatin1String("CIFS") || fsType == QLatin1String("NFS") ||
-        fsType == QLatin1String("SMBFS") || fsType == QLatin1String("NETFS")) {
-        return false;
-    }
-    // UNC device paths indicate network volumes
-    return !vol.device().startsWith("\\\\");
 }
 
 } // namespace
@@ -564,12 +553,9 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
     // Primary filesystem entry
     QSet<QString> seenDevices;
     seenDevices.insert(storageInfo.device());
-    const auto isLocalDevice = [](const QStorageInfo& vol) {
-        return isLocalWin32Volume(vol);
-    };
     result.filesystems.push_back({primaryFsRoot, storageInfo.rootPath(),
                                    storageInfo.bytesFree(), storageInfo.bytesTotal(),
-                                   isLocalDevice(storageInfo)});
+                                   isLocalFilesystem(storageInfo)});
 
     for (const QStorageInfo& vol : QStorageInfo::mountedVolumes()) {
         if (!vol.isValid() || !vol.isReady())
@@ -598,7 +584,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         result.totalBytes += vol.bytesTotal();
         result.filesystems.push_back({volRoot, vol.rootPath(),
                                        vol.bytesFree(), vol.bytesTotal(),
-                                       isLocalDevice(vol)});
+                                       isLocalFilesystem(vol)});
     }
 
     emitProgress(result, path, progressReadyCallback, progressCallback, true);
