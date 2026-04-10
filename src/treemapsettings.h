@@ -6,6 +6,24 @@
 #include <QList>
 #include <QString>
 #include <QStringList>
+#include <QHash>
+
+enum class FolderMark : int {
+    None = 0,
+    ColorRed, ColorOrange, ColorYellow, ColorGreen, ColorBlue, ColorPurple,
+    CatGames, CatDevelopment, CatBackup, CatCloud, CatPhotos, CatDownloads, CatTemporary,
+    CatMusic, CatFavourites, CatEncrypted, CatVideo
+};
+
+inline bool isFolderColorMark(FolderMark m)
+{
+    return m >= FolderMark::ColorRed && m <= FolderMark::ColorPurple;
+}
+
+inline bool isFolderIconMark(FolderMark m)
+{
+    return m >= FolderMark::CatGames && m <= FolderMark::CatVideo;
+}
 
 // Implemented in treemapsettings.cpp
 QColor defaultFreeSpaceColor();
@@ -150,6 +168,8 @@ struct TreemapSettings {
     QString lightModeColorThemeId;
     QString darkModeColorThemeId;
     bool followSystemColorTheme = true;
+    QHash<QString, FolderMark> folderColorMarks;
+    QHash<QString, FolderMark> folderIconMarks;
 
     TreemapSettings();
 

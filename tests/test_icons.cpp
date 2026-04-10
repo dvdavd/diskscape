@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 dvdavd
 // SPDX-License-Identifier: MIT
 #include "mainwindow_utils.h"
+#include "svgutils.h"
 
 #include <QApplication>
 #include <QIcon>

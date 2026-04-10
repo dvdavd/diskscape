@@ -61,7 +61,6 @@ QSettings appSettings();
 void saveSettingsAsync(std::function<void(QSettings&)> fn);
 QIcon makeColorSwatchIcon(const QColor& color);
 QIcon makeTintedFolderIcon(const QColor& color);
-QIcon makeRecoloredSvgIcon(const QString& svgPath, const QColor& color);
 QIcon toolbarIcon(std::initializer_list<const char*> names, const QString& resource);
 void clearIconCaches();
 QList<FileTypeSummary> collectAndSortFileSummaries(FileNode* root,

@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 #include "treemap_drawing.h"
 #include <QHash>
+#include <QIcon>
 #include <QPointF>
 #include <QRegularExpression>
 #include <QString>
 #include <QStringList>
+#include "svgutils.h"
 #include <algorithm>
 #include <cmath>
 
@@ -533,9 +535,33 @@ TileChromeGeometry makeTileChromeGeometry(const QRectF& bounds, const TreemapSet
     return g;
 }
 
+static QIcon folderMarkIcon(FolderMark mark, const QColor& textColor)
+{
+    const char* path = nullptr;
+    switch (mark) {
+        case FolderMark::CatGames:       path = ":/assets/tabler-icons/device-gamepad-2.svg"; break;
+        case FolderMark::CatDevelopment: path = ":/assets/tabler-icons/code.svg";             break;
+        case FolderMark::CatBackup:      path = ":/assets/tabler-icons/database-export.svg";  break;
+        case FolderMark::CatCloud:       path = ":/assets/tabler-icons/cloud.svg";            break;
+        case FolderMark::CatPhotos:       path = ":/assets/tabler-icons/photo.svg";            break;
+        case FolderMark::CatDownloads:   path = ":/assets/tabler-icons/download.svg";         break;
+        case FolderMark::CatTemporary:   path = ":/assets/tabler-icons/trash.svg";            break;
+        case FolderMark::CatMusic:       path = ":/assets/tabler-icons/music.svg";            break;
+        case FolderMark::CatFavourites:  path = ":/assets/tabler-icons/heart.svg";            break;
+        case FolderMark::CatEncrypted:   path = ":/assets/tabler-icons/lock.svg";             break;
+        case FolderMark::CatVideo:       path = ":/assets/tabler-icons/video.svg";            break;
+        default: break;
+    }
+    if (path) {
+        return makeRecoloredSvgIcon(QString::fromLatin1(path), textColor);
+    }
+    return QIcon();
+}
+
 void drawHeaderLabel(QPainter& painter, const QRectF& rect, const QString& text,
                      const QFont& font, const QFontMetrics& metrics, const QColor& color,
-                     qreal pixelScale, Qt::LayoutDirection direction)
+                     qreal pixelScale, Qt::LayoutDirection direction,
+                     FolderMark mark)
 {
     if (rect.width() <= 0.0 || rect.height() <= 0.0 || text.isEmpty()) {
         return;
@@ -544,6 +570,24 @@ void drawHeaderLabel(QPainter& painter, const QRectF& rect, const QString& text,
     const QRectF snappedRect = snapRectToPixels(rect, pixelScale);
     if (snappedRect.width() <= 0.0 || snappedRect.height() <= 0.0) {
         return;
+    }
+
+    const QIcon markIcon = folderMarkIcon(mark, color);
+    QRectF textRect = snappedRect;
+    if (!markIcon.isNull()) {
+        const qreal iconSize = std::min<qreal>(snappedRect.height() * 0.9, static_cast<qreal>(metrics.height()));
+        const qreal iconX = (direction == Qt::RightToLeft)
+            ? (snappedRect.right() - iconSize)
+            : snappedRect.left();
+        const QRectF iconRect(iconX,
+                              snappedRect.top() + (snappedRect.height() - iconSize) / 2.0,
+                              iconSize, iconSize);
+        markIcon.paint(&painter, iconRect.toRect(), Qt::AlignCenter);
+        if (direction == Qt::RightToLeft) {
+            textRect.setRight(textRect.right() - (iconSize + 4.0 / pixelScale));
+        } else {
+            textRect.setLeft(textRect.left() + iconSize + 4.0 / pixelScale);
+        }
     }
 
     painter.setPen(color);
@@ -554,14 +598,15 @@ void drawHeaderLabel(QPainter& painter, const QRectF& rect, const QString& text,
     // logical pixels — so the text rasterizer sees a stable integer device-pixel position
     // during panning rather than a cycling sub-pixel offset from integer ascent metrics.
     const qreal baselineY = std::round(
-        (snappedRect.center().y() + ((metrics.ascent() - metrics.descent()) * 0.5)) * pixelScale)
+        (textRect.center().y() + ((metrics.ascent() - metrics.descent()) * 0.5)) * pixelScale)
         / pixelScale;
-    painter.drawText(QPointF(leadingTextX(snappedRect, text, metrics, direction), baselineY), text);
+    painter.drawText(QPointF(leadingTextX(textRect, text, metrics, direction), baselineY), text);
 }
 
 void drawFileLabel(QPainter& painter, const QRectF& rect, const QString& text,
                    const QFont& font, const QFontMetrics& metrics, const QColor& color,
-                   qreal pixelScale, Qt::LayoutDirection direction)
+                   qreal pixelScale, Qt::LayoutDirection direction,
+                   FolderMark mark)
 {
     if (rect.width() <= 0.0 || rect.height() <= 0.0 || text.isEmpty()) {
         return;
@@ -570,6 +615,24 @@ void drawFileLabel(QPainter& painter, const QRectF& rect, const QString& text,
     const QRectF snappedRect = snapRectToPixels(rect, pixelScale);
     if (snappedRect.width() <= 0.0 || snappedRect.height() <= 0.0) {
         return;
+    }
+
+    const QIcon markIcon = folderMarkIcon(mark, color);
+    QRectF textRect = snappedRect;
+    const qreal iconSize = std::min<qreal>(snappedRect.height() * 0.9, static_cast<qreal>(metrics.height()));
+    if (!markIcon.isNull() && iconSize >= 8.0) {
+        const qreal iconX = (direction == Qt::RightToLeft)
+            ? (snappedRect.right() - iconSize)
+            : snappedRect.left();
+        const QRectF iconRect(iconX,
+                              snappedRect.top() + (metrics.height() - iconSize) / 2.0,
+                              iconSize, iconSize);
+        markIcon.paint(&painter, iconRect.toRect(), Qt::AlignCenter);
+        if (direction == Qt::RightToLeft) {
+            textRect.setRight(textRect.right() - (iconSize + 4.0 / pixelScale));
+        } else {
+            textRect.setLeft(textRect.left() + iconSize + 4.0 / pixelScale);
+        }
     }
 
     painter.setPen(color);
@@ -585,11 +648,14 @@ void drawFileLabel(QPainter& painter, const QRectF& rect, const QString& text,
     };
     qreal baselineY = snapBaseline(snappedRect.top() + metrics.ascent());
     const qreal maxBaselineY = snapBaseline(snappedRect.bottom() - metrics.descent());
-    for (const QString& line : lines) {
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString& line = lines.at(i);
         if (line.isEmpty() || baselineY > maxBaselineY) {
             break;
         }
-        painter.drawText(QPointF(leadingTextX(snappedRect, line, metrics, direction), baselineY), line);
+        // Only the first line respects the icon indentation for now (simplification)
+        const QRectF currentLineRect = (i == 0) ? textRect : snappedRect;
+        painter.drawText(QPointF(leadingTextX(currentLineRect, line, metrics, direction), baselineY), line);
         baselineY = snapBaseline(baselineY + metrics.lineSpacing());
     }
 }

@@ -75,13 +75,14 @@ qreal folderDetailOpacity(const QRectF& bounds, const TreemapSettings& settings)
 TileChromeGeometry makeTileChromeGeometry(const QRectF& bounds, const TreemapSettings& settings,
                                           bool snapTile, bool detailedChrome, qreal pixelScale);
 void drawHeaderLabel(QPainter& painter, const QRectF& rect, const QString& text,
-                     const QFont& font, const QFontMetrics& metrics, const QColor& color,
-                     qreal pixelScale, Qt::LayoutDirection direction);
+                      const QFont& font, const QFontMetrics& metrics, const QColor& color,
+                      qreal pixelScale, Qt::LayoutDirection direction,
+                      FolderMark mark = FolderMark::None);
 void drawFileLabelLine(QPainter& painter, const QRectF& rect, const QString& text, int lineIndex,
-                       const QFont& font, const QFontMetrics& metrics, const QColor& color,
-                       qreal pixelScale, Qt::LayoutDirection direction);
+                        const QFont& font, const QFontMetrics& metrics, const QColor& color,
+                        qreal pixelScale, Qt::LayoutDirection direction);
 void drawFileLabel(QPainter& painter, const QRectF& rect, const QString& text,
-                   const QFont& font, const QFontMetrics& metrics, const QColor& color,
-                   qreal pixelScale, Qt::LayoutDirection direction);
-void paintTinyNodeFill(QPainter& painter, const QRectF& rect, const QColor& fillColor,
+                    const QFont& font, const QFontMetrics& metrics, const QColor& color,
+                    qreal pixelScale, Qt::LayoutDirection direction,
+                    FolderMark mark = FolderMark::None);void paintTinyNodeFill(QPainter& painter, const QRectF& rect, const QColor& fillColor,
                        qreal pixelScale, qreal opacity);

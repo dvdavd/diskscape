@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "mainwindow_utils.h"
+#include "svgutils.h"
 
+#include <QGuiApplication>
 #include <QIcon>
 #include <QPalette>
 #include <QString>

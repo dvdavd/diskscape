@@ -33,5 +33,16 @@
         <file>assets/tabler-icons/alert-triangle.svg</file>
         <file>assets/tabler-icons/pin.svg</file>
         <file>assets/tabler-icons/pin_filled.svg</file>
+        <file>assets/tabler-icons/highlight.svg</file>
+        <file>assets/tabler-icons/device-gamepad-2.svg</file>
+        <file>assets/tabler-icons/code.svg</file>
+        <file>assets/tabler-icons/database-export.svg</file>
+        <file>assets/tabler-icons/cloud.svg</file>
+        <file>assets/tabler-icons/download.svg</file>
+        <file>assets/tabler-icons/category-plus.svg</file>
+        <file>assets/tabler-icons/music.svg</file>
+        <file>assets/tabler-icons/heart.svg</file>
+        <file>assets/tabler-icons/lock.svg</file>
+        <file>assets/tabler-icons/video.svg</file>
     </qresource>
 </RCC>

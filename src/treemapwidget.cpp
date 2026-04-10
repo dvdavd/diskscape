@@ -4562,7 +4562,8 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                                         node, headerText, headerWidth, m_headerFm, 1, kHeaderElideBucketPx,
                                         layoutDirection()),
                                     m_headerFont, m_headerFm, headerTextColor, m_framePixelScale,
-                                    layoutDirection());
+                                    layoutDirection(),
+                                    m_settings.folderIconMarks.value(node->computePath()));
                 }
             }
             p.restore();

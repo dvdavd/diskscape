@@ -1,5 +1,5 @@
 pkgname=diskscape
-pkgver=0.9.23
+pkgver=0.9.24
 pkgrel=1
 pkgdesc='Qt-based desktop application for exploring disk usage as an interactive treemap'
 arch=('x86_64')
@@ -14,7 +14,7 @@ makedepends=(
     'qt6-tools'
 )
 source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/${pkgver}.tar.gz")
-sha256sums=('d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed')
+sha256sums=('SKIP')
 
 build() {
     local cmake_args=(

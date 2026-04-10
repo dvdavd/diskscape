@@ -7,8 +7,12 @@
 
 #include <QDialog>
 
+class QButtonGroup;
+class QColor;
 class QDialogButtonBox;
 class QCheckBox;
+class QIcon;
+class QStackedWidget;
 class QComboBox;
 class QDoubleSpinBox;
 class QFontComboBox;
@@ -31,6 +35,12 @@ public:
     explicit SettingsDialog(const TreemapSettings& settings, QWidget* parent = nullptr);
 
     TreemapSettings settings() const;
+
+    // Navigate to the File Types page, create a new group pre-filled with
+    // extension, and put focus on the name field ready for the user to type.
+    void openOnFileTypesNewGroup(const QString& extension);
+
+    static QIcon fileTypeGroupSwatchIcon(const QColor& color);
 
 private:
     static QDoubleSpinBox* createDoubleSpinBox(double min, double max, double step, int decimals);
@@ -55,7 +65,6 @@ private:
     void updateFileTypeGroupColorButton();
     void syncFileTypeGroupFromFields(int row);
     void syncFileTypeGroupToFields(int row);
-    static QIcon fileTypeGroupSwatchIcon(const QColor& color);
     void applySettingsToFields(const TreemapSettings& settings);
     void buildPreviewTree();
     void loadSelectedColorThemeIntoFields();
@@ -67,6 +76,7 @@ private:
     double minimumHeaderHeightForCurrentFont() const;
     void storeSelectedColorThemeInto(TreemapSettings& settings) const;
     void updateFolderBaseColorButton();
+    void updateFolderColorModeVisibility();
     void updateHighlightColorButton();
     void updateFreeSpaceColorButton();
     void updateUnknownFileTypeColorButton();
@@ -92,6 +102,11 @@ private:
     QComboBox* m_lightModeColorTheme = nullptr;
     QComboBox* m_darkModeColorTheme = nullptr;
     QComboBox* m_folderColorMode = nullptr;
+    QFormLayout* m_colorForm = nullptr;
+    QWidget* m_depthGradientPresetWrapper = nullptr;
+    QWidget* m_folderBaseColorWrapper = nullptr;
+    QWidget* m_satBrightWrapper = nullptr;
+    QWidget* m_depthChangeWrapper = nullptr;
     QComboBox* m_depthGradientPreset = nullptr;
     QCheckBox* m_depthGradientFlipped = nullptr;
     QPushButton* m_folderBaseColorButton = nullptr;
@@ -146,6 +161,8 @@ private:
     QPushButton* m_fileTypeGroupColorButton = nullptr;
     QPlainTextEdit* m_fileTypeGroupExtensions = nullptr;
     QGroupBox* m_fileTypeGroupEditBox = nullptr;
+    QStackedWidget* m_pages = nullptr;
+    QButtonGroup* m_sectionButtons = nullptr;
     TreemapWidget* m_previewWidget = nullptr;
     NodeArena m_previewArena;
     FileNode* m_previewRoot = nullptr;

@@ -732,6 +732,15 @@ void MainWindow::setupToolbar(QSettings& store)
     setActionTooltip(m_settingsAction, tr("Open application settings"));
     connect(m_settingsAction, &QAction::triggered, this, &MainWindow::openSettings);
 
+    m_clearMarksAction = new QAction(tr("Clear All Marked Folders"), this);
+    m_clearMarksAction->setIcon(menuActionIcon({"bookmark-remove"},
+        QStringLiteral(":/assets/tabler-icons/trash-x.svg"),
+        QStringLiteral(":/assets/tabler-icons/trash-x.svg"),
+        QStyle::SP_DialogDiscardButton));
+    connect(m_clearMarksAction, &QAction::triggered, this, &MainWindow::clearAllMarkedFolders);
+    m_clearMarksAction->setEnabled(
+        !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
+
     m_aboutAppAction = new QAction(tr("About Diskscape"), this);
     connect(m_aboutAppAction, &QAction::triggered, this, [this]() {
         QMessageBox::about(
@@ -891,6 +900,8 @@ void MainWindow::setupToolbar(QSettings& store)
     m_warningsMenuAction->setVisible(false);
     m_warningsMenuAction->setIcon(m_permissionWarningIcon);
     toolbarMenu->addSeparator();
+    toolbarMenu->addAction(m_clearMarksAction);
+    toolbarMenu->addSeparator();
     toolbarMenu->addAction(m_settingsAction);
     toolbarMenu->addSeparator();
     toolbarMenu->addAction(m_aboutAppAction);
@@ -983,6 +994,9 @@ void MainWindow::setupToolbar(QSettings& store)
     macViewMenu->addAction(m_toggleFreeSpaceAction);
     macViewMenu->addAction(m_toggleDirectoryTreeAction);
     macViewMenu->addAction(m_toggleTypeLegendAction);
+    macViewMenu->addSeparator();
+    macViewMenu->addAction(m_clearMarksAction);
+    macViewMenu->addSeparator();
     macViewMenu->addAction(m_permissionWarningAction);
 
     auto* macHelpMenu = mb->addMenu(tr("Help"));
@@ -2902,6 +2916,29 @@ void MainWindow::recolorCurrentTree()
     }));
 }
 
+void MainWindow::markFolder(FileNode* node, FolderMark mark)
+{
+    if (!node) return;
+    const QString path = node->computePath();
+    if (mark == FolderMark::None) {
+        m_settings.folderColorMarks.remove(path);
+        m_settings.folderIconMarks.remove(path);
+    } else if (isFolderColorMark(mark)) {
+        m_settings.folderColorMarks.insert(path, mark);
+    } else {
+        m_settings.folderIconMarks.insert(path, mark);
+    }
+    applyTreemapSettings(m_settings, true);
+}
+
+void MainWindow::clearAllMarkedFolders()
+{
+    if (m_settings.folderColorMarks.isEmpty() && m_settings.folderIconMarks.isEmpty()) return;
+    m_settings.folderColorMarks.clear();
+    m_settings.folderIconMarks.clear();
+    applyTreemapSettings(m_settings, true);
+}
+
 void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool persist)
 {
     const bool freeSpaceFilterChanged =
@@ -2940,6 +2977,8 @@ void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool pers
     if (m_treemapWidget) {
         m_treemapWidget->applySettings(m_settings);
     }
+    m_clearMarksAction->setEnabled(
+        !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
     recolorCurrentTree();
 }
 
@@ -3063,6 +3102,7 @@ void MainWindow::onIncrementalRefreshFinished()
                 sortChildrenBySizeRecursive(input.refreshed.root);
 
                 if (input.rootReplaced) {
+                    ColorUtils::assignColors(input.refreshed.root, settings);
                     input.preparedFreeSpaceNodes = prepareRootResultForDisplay(input.refreshed, currentPath,
                                                                                showFreeSpaceInOverview,
                                                                                settings, true);
@@ -3159,6 +3199,74 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
             QStringLiteral(":/assets/tabler-icons/file-info.svg"),
             QStringLiteral(":/assets/tabler-icons/file-info.svg"),
             QStyle::SP_FileDialogContentsView));
+
+        menu.addSeparator();
+        QMenu* markAsMenu = menu.addMenu(tr("Mark Folder As..."));
+        markAsMenu->setIcon(menuActionIcon({"bookmark-new"},
+            QStringLiteral(":/assets/tabler-icons/highlight.svg"),
+            QStringLiteral(":/assets/tabler-icons/highlight.svg"),
+            QStyle::SP_FileDialogContentsView));
+
+        const FolderMark currentColorMark = m_settings.folderColorMarks.value(path, FolderMark::None);
+        const FolderMark currentIconMark  = m_settings.folderIconMarks.value(path, FolderMark::None);
+        auto addMark = [&](const QString& label, FolderMark mark, const QString& iconPath, const QColor& color) {
+            QAction* a = markAsMenu->addAction(label);
+            if (color.isValid()) {
+                a->setIcon(makeColorSwatchIcon(color));
+            } else if (!iconPath.isEmpty()) {
+                a->setIcon(menuActionIcon({}, iconPath, iconPath, QStyle::SP_FileDialogContentsView));
+            }
+            a->setData(static_cast<int>(mark));
+            a->setCheckable(true);
+            a->setChecked(isFolderColorMark(mark) ? mark == currentColorMark
+                                                   : mark == currentIconMark);
+            return a;
+        };
+
+        markAsMenu->addSection(tr("Colour"));
+        addMark(tr("Red"), FolderMark::ColorRed, {}, Qt::red);
+        addMark(tr("Orange"), FolderMark::ColorOrange, {}, QColor(255, 165, 0));
+        addMark(tr("Yellow"), FolderMark::ColorYellow, {}, Qt::yellow);
+        addMark(tr("Green"), FolderMark::ColorGreen, {}, Qt::green);
+        addMark(tr("Blue"), FolderMark::ColorBlue, {}, Qt::blue);
+        addMark(tr("Purple"), FolderMark::ColorPurple, {}, QColor(160, 32, 240));
+        markAsMenu->addSection(tr("Icon"));
+        addMark(tr("Backup"), FolderMark::CatBackup, QStringLiteral(":/assets/tabler-icons/database-export.svg"), {});
+        addMark(tr("Cloud"), FolderMark::CatCloud, QStringLiteral(":/assets/tabler-icons/cloud.svg"), {});
+        addMark(tr("Development"), FolderMark::CatDevelopment, QStringLiteral(":/assets/tabler-icons/code.svg"), {});
+        addMark(tr("Downloads"), FolderMark::CatDownloads, QStringLiteral(":/assets/tabler-icons/download.svg"), {});
+        addMark(tr("Encrypted"), FolderMark::CatEncrypted, QStringLiteral(":/assets/tabler-icons/lock.svg"), {});
+        addMark(tr("Favourites"), FolderMark::CatFavourites, QStringLiteral(":/assets/tabler-icons/heart.svg"), {});
+        addMark(tr("Games"), FolderMark::CatGames, QStringLiteral(":/assets/tabler-icons/device-gamepad-2.svg"), {});
+        addMark(tr("Music"), FolderMark::CatMusic, QStringLiteral(":/assets/tabler-icons/music.svg"), {});
+        addMark(tr("Photos"), FolderMark::CatPhotos, QStringLiteral(":/assets/tabler-icons/photo.svg"), {});
+        addMark(tr("Temporary"), FolderMark::CatTemporary, QStringLiteral(":/assets/tabler-icons/trash.svg"), {});
+        addMark(tr("Video"), FolderMark::CatVideo, QStringLiteral(":/assets/tabler-icons/video.svg"), {});
+
+        const bool hasAnyMark = currentColorMark != FolderMark::None || currentIconMark != FolderMark::None;
+        if (hasAnyMark) {
+            menu.addAction(tr("Clear Mark"), [this, node]() {
+                markFolder(node, FolderMark::None);
+            });
+        }
+
+        connect(markAsMenu, &QMenu::triggered, this,
+                [this, node, currentColorMark, currentIconMark](QAction* action) {
+            const FolderMark mark = static_cast<FolderMark>(action->data().toInt());
+            if (mark == FolderMark::None) return;
+            // Clicking the already-active mark toggles it off
+            if (isFolderColorMark(mark) && mark == currentColorMark) {
+                const QString path = node->computePath();
+                m_settings.folderColorMarks.remove(path);
+                applyTreemapSettings(m_settings, true);
+            } else if (isFolderIconMark(mark) && mark == currentIconMark) {
+                const QString path = node->computePath();
+                m_settings.folderIconMarks.remove(path);
+                applyTreemapSettings(m_settings, true);
+            } else {
+                markFolder(node, mark);
+            }
+        });
     } else {
         openAction = menu.addAction(tr("Open"));
         openAction->setIcon(menuActionIcon({"document-open"},
@@ -3178,6 +3286,57 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
             QStyle::SP_FileIcon));
         deleteAction = menu.addAction(QString());
         menu.addSeparator();
+
+        const QString fileExt = QFileInfo(node->name).suffix().toLower();
+        if (!fileExt.isEmpty()) {
+            QMenu* addToTypeMenu = menu.addMenu(tr("Add .%1 to File Type").arg(fileExt));
+            addToTypeMenu->setIcon(menuActionIcon({"text-x-generic"},
+                QStringLiteral(":/assets/tabler-icons/files.svg"),
+                QStringLiteral(":/assets/tabler-icons/files.svg"),
+                QStyle::SP_FileIcon));
+            for (int i = 0; i < m_settings.fileTypeGroups.size(); ++i) {
+                const FileTypeGroup& group = m_settings.fileTypeGroups.at(i);
+                QAction* a = addToTypeMenu->addAction(group.name);
+                a->setIcon(SettingsDialog::fileTypeGroupSwatchIcon(group.color));
+                const bool alreadyIn = group.extensions.contains(fileExt, Qt::CaseInsensitive);
+                a->setCheckable(true);
+                a->setChecked(alreadyIn);
+                a->setData(i);
+            }
+            addToTypeMenu->addSeparator();
+            QAction* newGroupAction = addToTypeMenu->addAction(tr("New group..."));
+            newGroupAction->setIcon(menuActionIcon({"list-add"},
+                QStringLiteral(":/assets/tabler-icons/category-plus.svg"),
+                QStringLiteral(":/assets/tabler-icons/category-plus.svg"),
+                QStyle::SP_FileDialogNewFolder));
+            newGroupAction->setData(-1);
+            connect(addToTypeMenu, &QMenu::triggered, this,
+                    [this, node, fileExt](QAction* action) {
+                const int idx = action->data().toInt();
+                if (idx == -1) {
+                    SettingsDialog dialog(m_settings, this);
+                    dialog.openOnFileTypesNewGroup(fileExt);
+                    if (dialog.exec() == QDialog::Accepted) {
+                        applyTreemapSettings(dialog.settings(), true);
+                    }
+                } else if (idx >= 0 && idx < m_settings.fileTypeGroups.size()) {
+                    const bool alreadyIn = m_settings.fileTypeGroups.at(idx)
+                        .extensions.contains(fileExt, Qt::CaseInsensitive);
+                    // Remove from every group first (enforces no duplicates)
+                    for (FileTypeGroup& g : m_settings.fileTypeGroups) {
+                        g.extensions.removeIf([&](const QString& e) {
+                            return e.compare(fileExt, Qt::CaseInsensitive) == 0;
+                        });
+                    }
+                    // Add to the chosen group unless it was already there (toggle off)
+                    if (!alreadyIn) {
+                        m_settings.fileTypeGroups[idx].extensions.append(fileExt);
+                    }
+                    applyTreemapSettings(m_settings, true);
+                }
+            });
+        }
+
         propertiesAction = menu.addAction(tr("Properties"));
         propertiesAction->setIcon(menuActionIcon({"document-properties", "file-info"},
             QStringLiteral(":/assets/tabler-icons/file-info.svg"),

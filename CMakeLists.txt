@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(diskscape VERSION 0.9.23 LANGUAGES CXX)
+project(diskscape VERSION 0.9.24 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,6 +37,8 @@ qt_add_executable(diskscape
     ${SCANNER_BACKEND_SRC}
     src/filenode.h
     src/iconutils.h
+    src/svgutils.h
+    src/svgutils.cpp
     src/colorutils.h
     src/colorutils.cpp
     src/treemapsettings.h
@@ -216,6 +218,21 @@ set(DISKSCAPE_FILESYSTEMUTILS_SRC
     src/filesystemutils.cpp
 )
 
+set(DISKSCAPE_WIDGET_SRC
+    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
+    src/filenode.h
+    src/svgutils.h
+    src/svgutils.cpp
+    src/mainwindow_utils.h
+    src/mainwindow_utils.cpp
+    ${DISKSCAPE_SETTINGS_SRC}
+    ${DISKSCAPE_COLORUTILS_SRC}
+    src/treemapwidget.h
+    src/treemapwidget.cpp
+    src/treemap_drawing.h
+    src/treemap_drawing.cpp
+)
+
 diskscape_add_test(test_settings
     tests/test_settings.cpp
     ${DISKSCAPE_FILESYSTEMUTILS_SRC}
@@ -230,31 +247,18 @@ diskscape_add_test(test_drawing
     src/treemap_drawing.h
     src/treemap_drawing.cpp
     ${DISKSCAPE_COLORUTILS_SRC}
+    src/svgutils.h
+    src/svgutils.cpp
 )
 
 diskscape_add_test(test_filenode
     tests/test_filenode.cpp
-    src/filenode.h
-    src/mainwindow_utils.h
-    src/mainwindow_utils.cpp
-    ${DISKSCAPE_SETTINGS_SRC}
-    ${DISKSCAPE_COLORUTILS_SRC}
-    src/treemapwidget.h
-    src/treemapwidget.cpp
-    src/treemap_drawing.h
-    src/treemap_drawing.cpp
+    ${DISKSCAPE_WIDGET_SRC}
 )
 
 diskscape_add_test(test_icons
     tests/test_icons.cpp
-    src/mainwindow_utils.h
-    src/mainwindow_utils.cpp
-    ${DISKSCAPE_SETTINGS_SRC}
-    ${DISKSCAPE_COLORUTILS_SRC}
-    src/treemapwidget.h
-    src/treemapwidget.cpp
-    src/treemap_drawing.h
-    src/treemap_drawing.cpp
+    ${DISKSCAPE_WIDGET_SRC}
 )
 
 diskscape_add_test(test_scanner
@@ -264,19 +268,6 @@ diskscape_add_test(test_scanner
     ${SCANNER_BACKEND_SRC}
     ${DISKSCAPE_SETTINGS_SRC}
     ${DISKSCAPE_COLORUTILS_SRC}
-)
-
-set(DISKSCAPE_WIDGET_SRC
-    ${DISKSCAPE_FILESYSTEMUTILS_SRC}
-    src/filenode.h
-    src/mainwindow_utils.h
-    src/mainwindow_utils.cpp
-    ${DISKSCAPE_SETTINGS_SRC}
-    ${DISKSCAPE_COLORUTILS_SRC}
-    src/treemapwidget.h
-    src/treemapwidget.cpp
-    src/treemap_drawing.h
-    src/treemap_drawing.cpp
 )
 
 diskscape_add_test(test_search

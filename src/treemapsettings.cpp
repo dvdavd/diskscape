@@ -262,7 +262,7 @@ void TreemapSettings::applyDefaults(TreemapSettings& settings)
             QStringLiteral("m2ts"), QStringLiteral("vob"), QStringLiteral("ogv"),
             QStringLiteral("3gp"), QStringLiteral("rmvb") } },
         { QStringLiteral("Documents"),
-          QColor::fromHslF(0.03f, 1.0f, 0.50f),
+          QColor::fromHslF(0.90f, 1.0f, 0.50f),
           { QStringLiteral("pdf"), QStringLiteral("doc"), QStringLiteral("docx"),
             QStringLiteral("xls"), QStringLiteral("xlsx"), QStringLiteral("ppt"),
             QStringLiteral("pptx"), QStringLiteral("odt"), QStringLiteral("ods"),
@@ -725,6 +725,46 @@ TreemapSettings TreemapSettings::load(QSettings& store)
         settings.activeColorThemeId = migrated.id;
     }
 
+    // Load colour marks
+    const int colorMarkCount = store.beginReadArray("treemap/folderColorMarks");
+    for (int i = 0; i < colorMarkCount; ++i) {
+        store.setArrayIndex(i);
+        const QString path = store.value("path").toString();
+        const int markValue = store.value("mark").toInt();
+        if (!path.isEmpty()) {
+            settings.folderColorMarks.insert(path, static_cast<FolderMark>(markValue));
+        }
+    }
+    store.endArray();
+
+    // Load icon marks
+    const int iconMarkCount = store.beginReadArray("treemap/folderIconMarks");
+    for (int i = 0; i < iconMarkCount; ++i) {
+        store.setArrayIndex(i);
+        const QString path = store.value("path").toString();
+        const int markValue = store.value("mark").toInt();
+        if (!path.isEmpty()) {
+            settings.folderIconMarks.insert(path, static_cast<FolderMark>(markValue));
+        }
+    }
+    store.endArray();
+
+    // Migrate old combined folderMarks into the appropriate map
+    const int oldMarkCount = store.beginReadArray("treemap/folderMarks");
+    for (int i = 0; i < oldMarkCount; ++i) {
+        store.setArrayIndex(i);
+        const QString path = store.value("path").toString();
+        const FolderMark mark = static_cast<FolderMark>(store.value("mark").toInt());
+        if (!path.isEmpty()) {
+            if (isFolderColorMark(mark)) {
+                settings.folderColorMarks.insert(path, mark);
+            } else if (isFolderIconMark(mark)) {
+                settings.folderIconMarks.insert(path, mark);
+            }
+        }
+    }
+    store.endArray();
+
     settings.sanitize();
     return settings;
 }
@@ -829,6 +869,29 @@ void TreemapSettings::save(QSettings& store) const
         store.setValue("name", g.name);
         store.setValue("color", g.color.name(QColor::HexRgb));
         store.setValue("extensions", g.extensions.join(QLatin1Char(',')));
+    }
+    store.endArray();
+
+    store.remove("treemap/folderMarks");
+    store.beginWriteArray("treemap/folderColorMarks");
+    int colorMarkIdx = 0;
+    for (auto it = snapshot.folderColorMarks.constBegin(); it != snapshot.folderColorMarks.constEnd(); ++it) {
+        if (it.value() != FolderMark::None) {
+            store.setArrayIndex(colorMarkIdx++);
+            store.setValue("path", it.key());
+            store.setValue("mark", static_cast<int>(it.value()));
+        }
+    }
+    store.endArray();
+
+    store.beginWriteArray("treemap/folderIconMarks");
+    int iconMarkIdx = 0;
+    for (auto it = snapshot.folderIconMarks.constBegin(); it != snapshot.folderIconMarks.constEnd(); ++it) {
+        if (it.value() != FolderMark::None) {
+            store.setArrayIndex(iconMarkIdx++);
+            store.setValue("path", it.key());
+            store.setValue("mark", static_cast<int>(it.value()));
+        }
     }
     store.endArray();
 }

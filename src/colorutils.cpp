@@ -3,6 +3,7 @@
 #include "colorutils.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QtGlobal>
 #include <algorithm>
 #include <cmath>
@@ -349,6 +350,44 @@ float initialFolderBranchHue(const FileNode* root, const TreemapSettings& settin
     return normalizedHue(rootFolderHue(root));
 }
 
+// Colour for a folder that has an explicit colour mark.
+// Differs from folderColorForBranch:
+//   - base lightness is shifted by kMidDepthOffset normal steps so the mark
+//     starts at a mid-level shade rather than the extremes of the user's range
+//   - per-level step is halved so the mark is still depth-aware but subtler
+//   - saturation gets a 30% boost for stronger visual pop
+//   - always uses branchHue (ignores depth-gradient preset)
+static QColor folderColorForMark(int depth, float branchHue, const TreemapSettings& settings)
+{
+    const int relativeDepth = std::max(depth - 1, 0);
+    const bool singleHue = settings.folderColorMode == TreemapSettings::SingleHue;
+
+    const float rawSat = singleHue
+        ? static_cast<float>(settings.folderBaseColor.hslSaturationF())
+        : static_cast<float>(settings.folderColorSaturation);
+    const float saturation = std::clamp(rawSat * 1.3f, 0.0f, 1.0f);
+
+    const float baseLightness = singleHue
+        ? static_cast<float>(settings.folderBaseColor.lightnessF())
+        : static_cast<float>(settings.folderColorBrightness);
+
+    // Shift the base shade by 3 normal steps toward the mid-range.
+    constexpr int kMidDepthOffset = 3;
+    const float stepSize = static_cast<float>(settings.folderColorDarkenPerLevel);
+    const float midOffset = stepSize * kMidDepthOffset;
+    const float midBase = settings.folderDepthBrightnessMode == TreemapSettings::LightenPerLevel
+        ? baseLightness + midOffset
+        : baseLightness - midOffset;
+
+    // Half step size for depth variation within the marked branch.
+    const float depthStep = (stepSize * 0.5f) * static_cast<float>(relativeDepth);
+    const float signedDepthStep = settings.folderDepthBrightnessMode == TreemapSettings::LightenPerLevel
+        ? depthStep : -depthStep;
+
+    return QColor::fromHslF(normalizedHue(branchHue), saturation,
+                            std::clamp(midBase + signedDepthStep, 0.0f, 1.0f), 1.0f);
+}
+
 QColor folderColorForBranch(int depth, float branchHue, const TreemapSettings& settings)
 {
     const int relativeDepth = std::max(depth - 1, 0);
@@ -435,21 +474,55 @@ static QColor fileColorFast(const QString& name,
 
 static void assignColorsRecurse(FileNode* node, int depth, float branchHue,
                                 const QHash<uint64_t, QRgb>& fileColorLookup,
-                                const TreemapSettings& settings)
+                                const TreemapSettings& settings,
+                                const QString& parentPath,
+                                bool inMarkedBranch)
 {
     if (!node) {
         return;
     }
 
+    // Prefer absolutePath when set (scan root, and incremental-refresh subtree root
+    // which has depth > 0 but no parent in the fresh ScanResult).
+    const QString currentPath = !node->absolutePath.isEmpty()
+        ? node->absolutePath
+        : (parentPath.isEmpty() ? node->name : QDir(parentPath).filePath(node->name));
+
     if (node->isDirectory) {
-        node->color = folderColor(depth, branchHue, settings).rgba();
+        float effectiveHue = branchHue;
+        const auto it = settings.folderColorMarks.find(currentPath);
+        bool hueChanged = false;
+        if (it != settings.folderColorMarks.end()) {
+            switch (it.value()) {
+                case FolderMark::ColorRed:    effectiveHue = 0.0f; hueChanged = true; break;
+                case FolderMark::ColorOrange: effectiveHue = 30.0f / 360.0f; hueChanged = true; break;
+                case FolderMark::ColorYellow: effectiveHue = 60.0f / 360.0f; hueChanged = true; break;
+                case FolderMark::ColorGreen:  effectiveHue = 120.0f / 360.0f; hueChanged = true; break;
+                case FolderMark::ColorBlue:   effectiveHue = 240.0f / 360.0f; hueChanged = true; break;
+                case FolderMark::ColorPurple: effectiveHue = 280.0f / 360.0f; hueChanged = true; break;
+                default: break;
+            }
+        }
+        if (hueChanged) {
+            node->color = folderColorForMark(depth, effectiveHue, settings).rgba();
+            branchHue = effectiveHue;
+            inMarkedBranch = true;
+        } else if (inMarkedBranch) {
+            // Inside a marked branch: use the same formula as the mark root so that
+            // depth progression is consistent (both start from the same mid-base
+            // and use the same half-step size). Using folderColorForBranch here
+            // would start from a different base, making children lighter than parent.
+            node->color = folderColorForMark(depth, effectiveHue, settings).rgba();
+        } else {
+            node->color = folderColor(depth, effectiveHue, settings).rgba();
+        }
     } else {
         node->color = fileColorFast(node->name, fileColorLookup, settings).rgba();
     }
 
     for (FileNode* child : node->children) {
         if (!child->isVirtual) {
-            assignColorsRecurse(child, depth + 1, branchHue, fileColorLookup, settings);
+            assignColorsRecurse(child, depth + 1, branchHue, fileColorLookup, settings, currentPath, inMarkedBranch);
         }
     }
 }
@@ -457,7 +530,7 @@ static void assignColorsRecurse(FileNode* node, int depth, float branchHue,
 void assignColorsForSubtree(FileNode* node, int depth, float branchHue, const TreemapSettings& settings)
 {
     const QHash<uint64_t, QRgb> fileColorLookup = buildFileColorLookup(settings);
-    assignColorsRecurse(node, depth, branchHue, fileColorLookup, settings);
+    assignColorsRecurse(node, depth, branchHue, fileColorLookup, settings, node->parent ? node->parent->computePath() : QString(), false);
 }
 
 static void assignColorsWithLookup(FileNode* root, const QHash<uint64_t, QRgb>& fileColorLookup,
@@ -467,12 +540,29 @@ static void assignColorsWithLookup(FileNode* root, const QHash<uint64_t, QRgb>& 
         return;
     }
 
-    root->color = folderColor(0, initialFolderBranchHue(root, settings), settings).rgba();
+    float rootHue = initialFolderBranchHue(root, settings);
+    const auto it = settings.folderColorMarks.find(root->absolutePath);
+    bool rootHueChanged = false;
+    if (it != settings.folderColorMarks.end()) {
+        switch (it.value()) {
+            case FolderMark::ColorRed:    rootHue = 0.0f; rootHueChanged = true; break;
+            case FolderMark::ColorOrange: rootHue = 30.0f / 360.0f; rootHueChanged = true; break;
+            case FolderMark::ColorYellow: rootHue = 60.0f / 360.0f; rootHueChanged = true; break;
+            case FolderMark::ColorGreen:  rootHue = 120.0f / 360.0f; rootHueChanged = true; break;
+            case FolderMark::ColorBlue:   rootHue = 240.0f / 360.0f; rootHueChanged = true; break;
+            case FolderMark::ColorPurple: rootHue = 280.0f / 360.0f; rootHueChanged = true; break;
+            default: break; // Category marks don't change the color
+        }
+    }
+
+    root->color = rootHueChanged
+        ? folderColorForMark(0, rootHue, settings).rgba()
+        : folderColor(0, rootHue, settings).rgba();
 
     for (FileNode* child : root->children) {
         if (!child->isVirtual) {
             assignColorsRecurse(child, 1, topLevelFolderBranchHue(child->name, settings),
-                                fileColorLookup, settings);
+                                fileColorLookup, settings, root->absolutePath, rootHueChanged);
         }
     }
 }

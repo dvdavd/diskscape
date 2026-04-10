@@ -137,6 +137,8 @@ private:
     void launchIncrementalRefresh(const QString& refreshPath);
     void applyTreemapSettings(const TreemapSettings& settings, bool persist);
     void recolorCurrentTree();
+    void markFolder(FileNode* node, FolderMark mark);
+    void clearAllMarkedFolders();
     void syncColorThemeWithSystem(bool darkMode, bool persist);
     void updateDirectoryTreePanel();
     void populateDirectoryTreeChildren(QTreeWidgetItem* item);
@@ -175,6 +177,7 @@ private:
     QAction* m_toggleDirectoryTreeAction = nullptr;
     QAction* m_toggleTypeLegendAction = nullptr;
     QAction* m_settingsAction = nullptr;
+    QAction* m_clearMarksAction = nullptr;
     QAction* m_aboutAppAction = nullptr;
     QAction* m_aboutQtAction = nullptr;
     QAction* m_limitToSameFilesystemAction = nullptr;

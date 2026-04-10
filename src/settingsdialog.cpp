@@ -48,6 +48,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <algorithm>
 #include <cmath>
 
 static void drawGradientSwatch(QPainter* painter, const QRect& r, const QList<QColor>& stops)
@@ -728,24 +729,25 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     presetInnerLayout->setSpacing(8);
     presetInnerLayout->addWidget(m_depthGradientPreset, 1);
     presetInnerLayout->addWidget(m_depthGradientFlipped);
-    auto* depthGradientPresetWrapper = createFieldWithDescription(presetInner, QString());
-    colorForm->addRow(tr("Gradient preset"), depthGradientPresetWrapper);
-    colorForm->setRowVisible(depthGradientPresetWrapper, false);
-    auto* folderBaseColorWrapper = createFieldWithDescription(
+    m_depthGradientPresetWrapper = createFieldWithDescription(presetInner, QString());
+    colorForm->addRow(tr("Gradient preset"), m_depthGradientPresetWrapper);
+    colorForm->setRowVisible(m_depthGradientPresetWrapper, false);
+    m_folderBaseColorWrapper = createFieldWithDescription(
         m_folderBaseColorButton,
         QString());
-    colorForm->addRow(tr("Folder base colour"), folderBaseColorWrapper);
-    colorForm->setRowVisible(folderBaseColorWrapper, false);
-    auto* satBrightWrapper = createPairedFieldWithDescription(
+    colorForm->addRow(tr("Folder base colour"), m_folderBaseColorWrapper);
+    colorForm->setRowVisible(m_folderBaseColorWrapper, false);
+    m_satBrightWrapper = createPairedFieldWithDescription(
         m_folderColorSaturation, tr("Saturation %"),
         m_folderColorBrightness, tr("Brightness %"),
         QString());
-    colorForm->addRow(tr("Folder colour"), satBrightWrapper);
-    auto* depthChangeWrapper = createPairedFieldWithDescription(
+    colorForm->addRow(tr("Folder colour"), m_satBrightWrapper);
+    m_depthChangeWrapper = createPairedFieldWithDescription(
         m_folderDepthBrightnessMode, tr("Mode"),
         m_folderColorDarkenPerLevel, tr("Amount %"),
         tr("Choose whether deeper folders darken or lighten, and by how much per level."));
-    colorForm->addRow(tr("Folder depth change"), depthChangeWrapper);
+    colorForm->addRow(tr("Folder depth change"), m_depthChangeWrapper);
+    m_colorForm = colorForm;
     colorForm->addRow(tr("File colour"),
                       createPairedFieldWithDescription(
                           m_fileColorSaturation, tr("Saturation %"),
@@ -943,16 +945,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     connect(m_fileFontSize, qOverload<int>(&QSpinBox::valueChanged), this, &SettingsDialog::refreshPreview);
     connect(m_fileFontBold, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
     connect(m_fileFontItalic, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
-    connect(m_folderColorMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
-            [this, colorForm, satBrightWrapper, depthChangeWrapper,
-             depthGradientPresetWrapper, folderBaseColorWrapper](int) {
-        const int mode = m_folderColorMode->currentData().toInt();
-        const bool isSingleHue = mode == TreemapSettings::SingleHue;
-        const bool isDepthGradient = mode == TreemapSettings::DepthGradient;
-        colorForm->setRowVisible(depthGradientPresetWrapper, !isSingleHue);
-        colorForm->setRowVisible(folderBaseColorWrapper, isSingleHue);
-        colorForm->setRowVisible(satBrightWrapper, !isSingleHue);
-        colorForm->setRowVisible(depthChangeWrapper, !isDepthGradient);
+    connect(m_folderColorMode, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) {
+        updateFolderColorModeVisibility();
         refreshPreview();
     });
     connect(m_depthGradientPreset, qOverload<int>(&QComboBox::currentIndexChanged), this, &SettingsDialog::refreshPreview);
@@ -1191,7 +1185,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
         return IconUtils::themeIcon(iconNames, light, dark);
     };
 
-    auto* pages = new QStackedWidget(this);
+    m_pages = new QStackedWidget(this);
+    auto* pages = m_pages;
     pages->addWidget(appearanceContainer);  // 0
     pages->addWidget(colorsContainer);      // 1
     pages->addWidget(fileTypesContainer);   // 2
@@ -1211,7 +1206,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
         }
     });
 
-    auto* sectionButtons = new QButtonGroup(this);
+    m_sectionButtons = new QButtonGroup(this);
+    auto* sectionButtons = m_sectionButtons;
     sectionButtons->setExclusive(true);
 
     const auto addSectionButton = [&](const QString& label, const QIcon& icon, int index) {
@@ -1372,6 +1368,7 @@ void SettingsDialog::loadSelectedColorThemeIntoFields()
         folderColorModeIndex = 0;
     }
     m_folderColorMode->setCurrentIndex(folderColorModeIndex);
+    updateFolderColorModeVisibility();
     {
         const QSignalBlocker b(m_depthGradientPreset);
         m_depthGradientPreset->setCurrentIndex(
@@ -1592,13 +1589,21 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     {
         QSignalBlocker blocker(m_fileTypeGroupsList);
         m_fileTypeGroupsList->clear();
+        QList<const FileTypeGroup*> sorted;
+        sorted.reserve(settings.fileTypeGroups.size());
         for (const FileTypeGroup& g : settings.fileTypeGroups) {
+            sorted.append(&g);
+        }
+        std::sort(sorted.begin(), sorted.end(), [](const FileTypeGroup* a, const FileTypeGroup* b) {
+            return a->name.compare(b->name, Qt::CaseInsensitive) < 0;
+        });
+        for (const FileTypeGroup* g : sorted) {
             auto* item = new QListWidgetItem(
-                fileTypeGroupSwatchIcon(g.color),
-                tr("%1  (%2 ext)").arg(g.name).arg(g.extensions.size()));
-            item->setData(Qt::UserRole,     g.color);
-            item->setData(Qt::UserRole + 1, g.extensions);
-            item->setData(Qt::UserRole + 2, g.name);
+                fileTypeGroupSwatchIcon(g->color),
+                tr("%1  (%2 ext)").arg(g->name).arg(g->extensions.size()));
+            item->setData(Qt::UserRole,     g->color);
+            item->setData(Qt::UserRole + 1, g->extensions);
+            item->setData(Qt::UserRole + 2, g->name);
             m_fileTypeGroupsList->addItem(item);
         }
         m_fileTypeGroupsList->setCurrentRow(0);
@@ -1997,6 +2002,20 @@ static void applyColorButton(QPushButton* button, const QColor& validColor)
     button->setStyleSheet(QString());
 }
 
+void SettingsDialog::updateFolderColorModeVisibility()
+{
+    if (!m_colorForm) {
+        return;
+    }
+    const int mode = m_folderColorMode->currentData().toInt();
+    const bool isSingleHue = mode == TreemapSettings::SingleHue;
+    const bool isDepthGradient = mode == TreemapSettings::DepthGradient;
+    m_colorForm->setRowVisible(m_depthGradientPresetWrapper, !isSingleHue);
+    m_colorForm->setRowVisible(m_folderBaseColorWrapper, isSingleHue);
+    m_colorForm->setRowVisible(m_satBrightWrapper, !isSingleHue);
+    m_colorForm->setRowVisible(m_depthChangeWrapper, !isDepthGradient);
+}
+
 void SettingsDialog::updateFolderBaseColorButton()
 {
     const QColor color = m_folderBaseColorButton->property("selectedColor").value<QColor>();
@@ -2029,9 +2048,7 @@ void SettingsDialog::updateUnknownFileTypeColorButton()
 
 QIcon SettingsDialog::fileTypeGroupSwatchIcon(const QColor& color)
 {
-    QPixmap px(16, 16);
-    px.fill(color.isValid() ? color : Qt::gray);
-    return QIcon(px);
+    return makeColorSwatchIcon(color.isValid() ? color : Qt::gray);
 }
 
 void SettingsDialog::updateFileTypeGroupColorButton()
@@ -2086,6 +2103,22 @@ void SettingsDialog::syncFileTypeGroupFromFields(int row)
 void SettingsDialog::onFileTypeGroupSelectionChanged()
 {
     syncFileTypeGroupToFields(m_fileTypeGroupsList->currentRow());
+}
+
+void SettingsDialog::openOnFileTypesNewGroup(const QString& extension)
+{
+    // Switch to the File Types page (index 2) and update the nav highlight.
+    m_pages->setCurrentIndex(2);
+    if (auto* btn = m_sectionButtons->button(2)) {
+        btn->setChecked(true);
+    }
+    addFileTypeGroup();
+    // Pre-fill the extension - addFileTypeGroup() left the extensions field empty.
+    m_fileTypeGroupExtensions->setPlainText(extension);
+    syncFileTypeGroupFromFields(m_fileTypeGroupsList->currentRow());
+    // Focus the name field so the user can type straight away.
+    m_fileTypeGroupName->setFocus();
+    m_fileTypeGroupName->selectAll();
 }
 
 void SettingsDialog::addFileTypeGroup()
