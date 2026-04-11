@@ -50,6 +50,9 @@ qt_add_executable(diskscape
     src/treemapwidget.cpp
     src/breadcrumbpathbar.h
     src/breadcrumbpathbar.cpp
+    src/filterparams.h
+    src/searchfilterpanel.h
+    src/searchfilterpanel.cpp
     src/filesystemwatchcontroller.h
     src/filesystemwatchcontroller.cpp
     src/settingsdialog.h

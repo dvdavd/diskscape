@@ -58,6 +58,7 @@ void squarifiedLayout(const std::vector<FileNode*>& children,
                       std::vector<std::pair<FileNode*, QRectF>>& result);
 QPointF snapCameraOriginToPixelGrid(const QPointF& origin, qreal scale, qreal pixelScale = 1.0);
 QColor contrastingTextColor(const QColor& background);
+QColor contrastingBorderColor(const QColor& background);
 QColor cachedShade(const QColor& color, bool lighten, int factor);
 QColor blendColors(const QColor& from, const QColor& to, qreal t);
 QColor cachedPanelBase(const QColor& folderBase, const QColor& paletteBase);

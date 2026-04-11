@@ -98,6 +98,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
 
         bool isDir = (dtype == DT_DIR);
         qint64 fileSize = 0;
+        int64_t fileMtime = 0;
 
         if (dtype == DT_UNKNOWN) {
             struct stat st;
@@ -113,6 +114,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                     continue;
             } else {
                 fileSize = st.st_size;
+                fileMtime = static_cast<int64_t>(st.st_mtime);
             }
         } else if (isDir) {
             if (settings.limitToSameFilesystem) {
@@ -126,8 +128,10 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
             }
         } else if (!isDir) {
             struct stat st;
-            if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) == 0)
+            if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) == 0) {
                 fileSize = st.st_size;
+                fileMtime = static_cast<int64_t>(st.st_mtime);
+            }
         }
 
         const QString childName = QString::fromLocal8Bit(dname);
@@ -165,6 +169,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
             child->isDirectory = false;
             child->parent = node;
             child->size = fileSize;
+            child->mtime = fileMtime;
             child->extKey = ColorUtils::packFileExt(child->name);
             child->color = ColorUtils::fileColorForName(child->name, settings).rgba();
             child->subtreeFileCount = 1;
@@ -298,6 +303,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
             bool isDir = (dtype == DT_DIR);
             qint64 fileSize = 0;
+            int64_t fileMtime = 0;
             if (dtype == DT_UNKNOWN) {
                 struct stat st;
                 if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) != 0) {
@@ -313,6 +319,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                         continue;
                 } else {
                     fileSize = st.st_size;
+                    fileMtime = static_cast<int64_t>(st.st_mtime);
                 }
             } else if (isDir) {
                 if (settings.limitToSameFilesystem) {
@@ -329,6 +336,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 struct stat st;
                 if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) == 0) {
                     fileSize = st.st_size;
+                    fileMtime = static_cast<int64_t>(st.st_mtime);
                 }
             }
 
@@ -365,6 +373,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 child->isDirectory = false;
                 child->parent = partition.parent;
                 child->size = fileSize;
+                child->mtime = fileMtime;
                 child->extKey = ColorUtils::packFileExt(child->name);
                 child->color = ColorUtils::fileColorForName(child->name, settings).rgba();
                 partition.parent->children.push_back(child);

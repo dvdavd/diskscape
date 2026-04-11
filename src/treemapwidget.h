@@ -3,6 +3,7 @@
 #pragma once
 
 #include "filenode.h"
+#include "filterparams.h"
 #include "treemapsettings.h"
 #include <QAbstractScrollArea>
 #include <QContextMenuEvent>
@@ -49,6 +50,8 @@ struct SearchIndex {
     std::vector<uint16_t> nameLens;    // indexed by node->id → byte length in flatNames
     QHash<uint64_t, std::vector<FileNode*>> filesByExt; // packed extension key → matching files
     std::string flatNames;             // flat UTF-8 buffer of all case-folded names
+    std::vector<uint8_t> markCache;    // indexed by node->id; 0xFF = no mark, else FolderMark int
+    std::vector<bool> directMarkCache; // indexed by node->id; true if the node itself has a mark
     uint32_t nodeCount = 0;
     std::shared_ptr<NodeArena> arenaOwner;
 };
@@ -103,9 +106,11 @@ public:
     void applySettings(const TreemapSettings& settings);
     void setScanInProgress(bool inProgress);
     void setScanPath(const QString& path);
+    void setFilterParams(const FilterParams& params);
     void setSearchPattern(const QString& pattern);
     void setSizeFilter(qint64 minBytes, qint64 maxBytes);
     void setHighlightedFileType(const QString& typeLabel);
+    void refreshSearchIndex();
     // Returns a snapshot of which node IDs are "search-reachable": directly matched
     // by the current search/size filter, or inside a search-matched directory.
     // Empty vector when no search is active. Safe to capture and read off the main thread.
@@ -118,6 +123,7 @@ public:
     QString highlightedFileType() const { return m_highlightedFileType; }
     void setWheelZoomEnabled(bool enabled) { m_wheelZoomEnabled = enabled; }
     FileNode* currentNode() const { return m_current; }
+    FileNodeStats filteredStats(const FileNode* node) const;
     qint64 effectiveNodeSize(const FileNode* node) const;
     const TreemapSettings& settings() const { return m_settings; }
     qreal cameraScale() const { return m_cameraScale; }
@@ -230,6 +236,7 @@ private:
     void rebuildSearchMatches();
     void rebuildSearchMetadata();
     void cancelPendingSearch();
+    void cancelPendingMetadata();
     void onSearchTaskFinished();
     void rebuildSearchMetadataAsync();
     void onMetadataTaskFinished();
@@ -400,6 +407,7 @@ private:
     bool m_wheelZoomEnabled = true;
     bool m_scanInProgress = false;
     QString m_scanPath;
+    FilterParams m_filterParams;
     QString m_searchPattern;
     QString m_searchCaseFoldedPattern;
     bool m_searchActive = false;
@@ -411,6 +419,7 @@ private:
     bool m_sizeFilterActive = false;
     qint64 m_previousMinSizeFilter = 0;
     qint64 m_previousMaxSizeFilter = 0;
+    FilterParams m_previousFilterParams;
     QString m_highlightedFileType;
     QString m_previousHighlightedFileType;
     QPointF m_lastActivationPos;
@@ -468,6 +477,7 @@ private:
     std::shared_ptr<SearchIndex> m_searchIndex;         // current (immutable once published)
     std::shared_ptr<SearchIndex> m_pendingSearchIndex;  // which index the in-flight search used
     std::shared_ptr<std::atomic<bool>> m_searchCancelToken;
+    std::shared_ptr<std::atomic<bool>> m_metadataCancelToken;
     QFutureWatcher<SearchMatchResult>* m_searchWatcher = nullptr;
     QFutureWatcher<std::shared_ptr<SearchIndex>>* m_metadataWatcher = nullptr;
     std::shared_ptr<std::atomic<bool>> m_fileTypeCancelToken;
@@ -523,6 +533,7 @@ private:
         }
         return searchMatchFlags(n) | fileTypeMatchFlags(n);
     }
+    bool isDescendantOfDirectMatch(const FileNode* node) const;
     std::vector<FileNode*> m_previousDirectSearchMatches;
     struct SplitCacheEntry {
         qreal aspectRatio = 1.0;   // viewContent.width() / viewContent.height() at cache time

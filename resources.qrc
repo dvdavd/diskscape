@@ -44,5 +44,7 @@
         <file>assets/tabler-icons/heart.svg</file>
         <file>assets/tabler-icons/lock.svg</file>
         <file>assets/tabler-icons/video.svg</file>
+        <file>assets/tabler-icons/filter.svg</file>
+        <file>assets/tabler-icons/filter-off.svg</file>
     </qresource>
 </RCC>

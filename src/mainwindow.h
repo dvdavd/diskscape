@@ -22,10 +22,9 @@
 class BreadcrumbPathBar;
 class FilesystemWatchController;
 class FreedesktopColorSchemeWatcher;
-class QComboBox;
+class SearchFilterPanel;
 class QAction;
 class QCloseEvent;
-class QLineEdit;
 class QLabel;
 class QMenu;
 class QResizeEvent;
@@ -116,14 +115,12 @@ private:
     void rebuildFilesystemWatchers();
     void setRefreshBusy(bool busy);
     void setSearchBusy(bool busy);
-    void applySearchFromToolbar();
     void onThemeSettled();
     void onFreedesktopColorSchemeChanged(bool dark);
     void applyThemeChange(bool darkMode, bool treemapDark);
     void updatePathBarChrome();
     void updateLandingPageChrome();
     void updateToolbarChrome();
-    void updateSizeFilterChrome();
     void updateToolbarIcons(const QColor& iconColor = {});
     void updateToolbarResponsiveLayout();
     void updateTypeLegendPanel();
@@ -159,7 +156,7 @@ private:
     QWidget* m_treemapPage = nullptr;
     TreemapWidget* m_treemapWidget = nullptr;
     BreadcrumbPathBar* m_pathBar = nullptr;
-    QLineEdit* m_searchEdit = nullptr;
+    SearchFilterPanel* m_filterPanel = nullptr;
     QLabel* m_searchStatusLabel = nullptr;
     QLabel* m_scanSeenStatusLabel = nullptr;
     QLabel* m_scanPathStatusLabel = nullptr;
@@ -175,6 +172,7 @@ private:
     QAction* m_resetZoomAction = nullptr;
     QAction* m_homeAction = nullptr;
     QAction* m_toggleFreeSpaceAction = nullptr;
+    QAction* m_toggleFilterPanelAction = nullptr;
     QAction* m_toggleDirectoryTreeAction = nullptr;
     QAction* m_toggleTypeLegendAction = nullptr;
     QAction* m_settingsAction = nullptr;
@@ -231,10 +229,8 @@ private:
     bool m_pendingScanBackgroundRefresh = false;
     QString m_pendingScanPath;
     QSet<QString> m_dirtyPaths;
-    QTimer* m_searchDebounceTimer = nullptr;
     QTimer* m_themeSettleTimer = nullptr;
     FreedesktopColorSchemeWatcher* m_colorSchemeWatcher = nullptr;
-    QComboBox* m_sizeFilterCombo = nullptr;
     QString m_activeRefreshPath;
     ViewStatePaths m_preRefreshViewPaths;
     std::vector<ViewStatePaths> m_preRefreshHistoryPaths;

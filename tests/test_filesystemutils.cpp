@@ -31,6 +31,9 @@ private slots:
 #ifdef Q_OS_WIN
         QVERIFY(isLocalFilesystem(QStringLiteral("NTFS"), QByteArrayLiteral("\\Device\\HarddiskVolume3"), QStringLiteral("C:/")));
         QVERIFY(isLocalFilesystem(QString(), QByteArrayLiteral("C:"), QStringLiteral("C:/")));
+        // Win32 device namespaces should be local
+        QVERIFY(isLocalFilesystem(QStringLiteral("NTFS"), QByteArrayLiteral("\\\\?\\Volume{12345678-1234-1234-1234-123456789012}\\"), QStringLiteral("D:/")));
+        QVERIFY(isLocalFilesystem(QStringLiteral("NTFS"), QByteArrayLiteral("\\\\.\\C:"), QStringLiteral("C:/")));
 #else
         QVERIFY(isLocalFilesystem(QStringLiteral("apfs"), QByteArrayLiteral("/dev/disk3s1"), QStringLiteral("/")));
         QVERIFY(isLocalFilesystem(QStringLiteral("ext4"), QByteArrayLiteral("/dev/nvme0n1p2"), QStringLiteral("/")));

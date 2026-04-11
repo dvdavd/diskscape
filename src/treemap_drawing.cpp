@@ -239,13 +239,18 @@ QPointF snapCameraOriginToPixelGrid(const QPointF& origin, qreal scale, qreal pi
         std::floor(origin.y() * snapScale) / snapScale);
 }
 
-QColor contrastingTextColor(const QColor& background)
+enum class ContrastType {
+    Text,
+    Border
+};
+
+static QColor contrastingColor(const QColor& background, ContrastType type)
 {
     // Cache QRgb → QRgb: there are only ~50–200 unique derived colors per scan
     // (hue-wheel × a handful of darker()/lighter() variants) so this hash stays
     // tiny while eliminating the pow() math on every visible tile every frame.
-    static QHash<QRgb, QRgb> cache;
-    const QRgb key = background.rgba();
+    static QHash<quint64, QRgb> cache;
+    const quint64 key = (static_cast<quint64>(background.rgba()) << 1) | (type == ContrastType::Border ? 1 : 0);
     auto it = cache.constFind(key);
     if (it != cache.cend())
         return QColor::fromRgba(*it);
@@ -259,13 +264,33 @@ QColor contrastingTextColor(const QColor& background)
     const qreal b = linearize(background.blueF());
     const qreal luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
-    const QColor lightText(245, 245, 245);
-    const QColor darkText(24, 24, 28);
+    QColor lightColor, darkColor;
+    if (type == ContrastType::Text) {
+        lightColor = QColor(245, 245, 245);
+        darkColor = QColor(24, 24, 28);
+    } else {
+        // Borders need to be visible but less "loud" than text.
+        // On dark backgrounds, use a light grey border.
+        // On light backgrounds, use a dark grey/black border.
+        lightColor = QColor(200, 200, 200, 180);
+        darkColor = QColor(0, 0, 0, 100);
+    }
+
     const qreal contrastWithLight = (1.0 + 0.05) / (luminance + 0.05);
     const qreal contrastWithDark = (luminance + 0.05) / (0.009 + 0.05);
-    const QColor result = (contrastWithDark >= contrastWithLight) ? darkText : lightText;
+    const QColor result = (contrastWithDark >= contrastWithLight) ? darkColor : lightColor;
     cache.insert(key, result.rgba());
     return result;
+}
+
+QColor contrastingTextColor(const QColor& background)
+{
+    return contrastingColor(background, ContrastType::Text);
+}
+
+QColor contrastingBorderColor(const QColor& background)
+{
+    return contrastingColor(background, ContrastType::Border);
 }
 
 QColor cachedShade(const QColor& color, bool lighten, int factor)

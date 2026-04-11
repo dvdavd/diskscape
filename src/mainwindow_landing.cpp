@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "mainwindow.h"
 #include "breadcrumbpathbar.h"
+#include "searchfilterpanel.h"
 
 #include "iconutils.h"
 #include "mainwindow_utils.h"
@@ -411,30 +412,16 @@ void relayoutLandingSection(QWidget* section, int columns)
 
 void MainWindow::updatePathBarChrome()
 {
-    if (!m_pathBar || !m_searchEdit) {
+    if (!m_pathBar) {
         return;
     }
 
-    m_searchEdit->ensurePolished();
-    int controlHeight = qMax(m_searchEdit->sizeHint().height(), m_pathBar->sizeHint().height());
-    if (m_sizeFilterCombo) {
-        m_sizeFilterCombo->ensurePolished();
-        controlHeight = qMax(controlHeight, m_sizeFilterCombo->sizeHint().height());
-    }
-#ifdef Q_OS_MACOS
-    m_pathBar->setFixedHeight(qMax(m_pathBar->sizeHint().height(), controlHeight));
-    m_searchEdit->setMinimumHeight(0);
-    m_searchEdit->setMaximumHeight(QWIDGETSIZE_MAX);
-#else
-    m_pathBar->setFixedHeight(controlHeight);
-    m_searchEdit->setFixedHeight(controlHeight);
-#endif
-    m_searchEdit->updateGeometry();
-    if (m_sizeFilterCombo) {
-        m_sizeFilterCombo->setFixedHeight(controlHeight);
-        m_sizeFilterCombo->updateGeometry();
-    }
+    m_pathBar->setFixedHeight(m_pathBar->sizeHint().height());
     m_pathBar->setChromeBorderColor(landingLocationBorderColor());
+
+    if (m_filterPanel) {
+        m_filterPanel->setChromeBorderColor(landingLocationBorderColor());
+    }
 }
 
 void MainWindow::updateLandingPageChrome()

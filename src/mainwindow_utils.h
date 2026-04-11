@@ -32,11 +32,6 @@ struct BreadcrumbPathSegment {
     QString path;
 };
 
-struct FileNodeStats {
-    int fileCount = 0;
-    qint64 totalSize = 0;
-};
-
 QFont generalUiFont();
 void applyMenuFontPolicy(QApplication& app);
 // Keeps the QApplication palette aligned with the active platform style after

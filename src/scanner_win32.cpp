@@ -53,6 +53,13 @@ qint64 getFileSizeFromFindData(const WIN32_FIND_DATAW& fd)
         std::min<ULONGLONG>(raw, static_cast<ULONGLONG>(std::numeric_limits<qint64>::max())));
 }
 
+// Converts a FILETIME (100-ns intervals since 1601-01-01) to Unix epoch seconds.
+int64_t filetimeToUnixSeconds(const FILETIME& ft)
+{
+    const ULONGLONG intervals = (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    return static_cast<int64_t>(intervals / 10000000ULL) - 11644473600LL;
+}
+
 // Converts a Win32 error code to a human-readable message via FormatMessageW.
 QString win32ErrorString(DWORD errorCode)
 {
@@ -186,6 +193,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                 activityCallback(childPath, fileSize);
             }
             child->size = fileSize;
+            child->mtime = filetimeToUnixSeconds(fd.ftLastWriteTime);
             child->subtreeFileCount = 1;
             child->extKey = ColorUtils::packFileExt(childName);
             child->color = ColorUtils::fileColorForName(childName, settings).rgba();
@@ -355,6 +363,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
             } else {
                 const qint64 fileSize = getFileSizeFromFindData(fd);
                 child->size = fileSize;
+                child->mtime = filetimeToUnixSeconds(fd.ftLastWriteTime);
                 child->extKey = ColorUtils::packFileExt(childName);
                 child->color = ColorUtils::fileColorForName(childName, settings).rgba();
                 partition.parent->children.push_back(child);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-// Shared constants and helpers used by both scanner_posix.cpp and scanner_std.cpp.
+// Shared constants and helpers used by scanner_posix.cpp and scanner_win32.cpp.
 // Placed in an anonymous namespace so each translation unit gets its own copy
 // (required for the thread_local statics inside emitProgress).
 

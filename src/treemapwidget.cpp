@@ -4,6 +4,7 @@
 #include "treemap_drawing.h"
 #include "colorutils.h"
 #include "filesystemutils.h"
+#include "mainwindow_utils.h"
 #include <QtConcurrent/QtConcurrent>
 #include <QApplication>
 #include <QThreadPool>
@@ -41,6 +42,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <unordered_set>
 
 class UsageBarWidget final : public QWidget {
 public:
@@ -230,8 +232,6 @@ private:
     bool m_compact = false;
 };
 
-namespace {
-
 class ThumbnailTask : public QRunnable {
 public:
     ThumbnailTask(const QString& path, TreemapWidget* widget,
@@ -370,6 +370,7 @@ private:
 
 constexpr quint8 kSearchSelfMatch = 0x1;
 constexpr quint8 kSearchSubtreeMatch = 0x2;
+constexpr quint8 kSearchMarkMatch = 0x4;
 constexpr quint8 kTypeSelfMatch = 0x1;
 constexpr quint8 kTypeSubtreeMatch = 0x2;
 constexpr qreal kCameraMinScale = 1.0;
@@ -528,8 +529,6 @@ QString treemapScrollBarStyleSheet(const QPalette& palette, qreal expandProgress
              QString::number(kOverlayScrollBarThickness),
              QString::number(radius),
              QString::number(inset));
-}
-
 }
 
 TreemapWidget::TreemapWidget(QWidget* parent)
@@ -1085,6 +1084,40 @@ void TreemapWidget::setScanPath(const QString& path)
     }
 }
 
+FileNodeStats TreemapWidget::filteredStats(const FileNode* node) const
+{
+    if (!node) {
+        return {};
+    }
+
+    if (!m_searchActive && m_highlightedFileType.isEmpty()) {
+        return fileNodeStats(node);
+    }
+
+    FileNodeStats stats;
+    std::function<void(const FileNode*)> recurse = [&](const FileNode* n) {
+        if (!n) return;
+
+        const uint8_t flags = effectiveMatchFlags(n);
+        // kSearchSelfMatch=0x1, kTypeSelfMatch=0x1, kSearchMarkMatch=0x4
+        if (flags & 0x01 || flags & 0x04) {
+            const FileNodeStats s = fileNodeStats(n);
+            stats.fileCount += s.fileCount;
+            stats.totalSize += s.totalSize;
+            return;
+        }
+
+        if (flags & 0x02) { // Subtree match (kSearchSubtreeMatch=0x2, kTypeSubtreeMatch=0x2)
+            for (const FileNode* child : n->children) {
+                recurse(child);
+            }
+        }
+    };
+
+    recurse(node);
+    return stats;
+}
+
 qint64 TreemapWidget::effectiveNodeSize(const FileNode* node) const
 {
     if (!node) return 0;
@@ -1095,21 +1128,42 @@ qint64 TreemapWidget::effectiveNodeSize(const FileNode* node) const
     return std::max(node->size, sum);
 }
 
-void TreemapWidget::setSearchPattern(const QString& pattern)
+void TreemapWidget::setFilterParams(const FilterParams& params)
 {
-    const QString normalized = pattern.trimmed();
-    if (m_searchPattern == normalized) {
-        return;
-    }
+    if (params == m_filterParams) return;
 
     clearHoverState(false);
+    const bool hideChanged = params.hideNonMatching != m_filterParams.hideNonMatching;
+    m_filterParams = params;
+
+    // Sync derived members used by incremental search logic
+    const QString normalized = params.namePattern.trimmed();
     m_searchPattern = normalized;
     m_searchCaseFoldedPattern = m_searchPattern.toCaseFolded();
-    m_searchActive = !m_searchPattern.isEmpty() || m_sizeFilterActive;
     m_searchUsesWildcards = !m_searchPattern.isEmpty()
         && (m_searchPattern.contains(QLatin1Char('*')) || m_searchPattern.contains(QLatin1Char('?')));
+    m_minSizeFilter = params.sizeMin;
+    m_maxSizeFilter = params.sizeMax;
+    m_sizeFilterActive = (params.sizeMin > 0 || params.sizeMax > 0);
+    m_searchActive = params.isActive();
+
+    if (hideChanged || m_filterParams.hideNonMatching) {
+        m_liveSplitCache.clear();
+    }
     rebuildSearchMatches();
     viewport()->update();
+}
+
+void TreemapWidget::setSearchPattern(const QString& pattern)
+{
+    FilterParams p = m_filterParams;
+    p.namePattern = pattern.trimmed();
+    setFilterParams(p);
+}
+
+void TreemapWidget::refreshSearchIndex()
+{
+    rebuildSearchMetadataAsync();
 }
 
 void TreemapWidget::setHighlightedFileType(const QString& typeLabel)
@@ -2953,11 +3007,15 @@ void TreemapWidget::cancelPendingSearch()
     if (m_searchCancelToken) {
         m_searchCancelToken->store(true, std::memory_order_relaxed);
     }
-
-    // Do not block the UI waiting for old metadata/search work to finish.
-    // The async tasks hold their own shared owners for any tree data they
-    // touch, and replacing the watched future is enough to ignore stale work.
     m_searchCancelToken = std::make_shared<std::atomic<bool>>(false);
+}
+
+void TreemapWidget::cancelPendingMetadata()
+{
+    if (m_metadataCancelToken) {
+        m_metadataCancelToken->store(true, std::memory_order_relaxed);
+    }
+    m_metadataCancelToken = std::make_shared<std::atomic<bool>>(false);
 }
 
 void TreemapWidget::cancelPendingFileTypeHighlight()
@@ -2981,6 +3039,7 @@ void TreemapWidget::rebuildSearchMatches()
         m_previousSearchUsesWildcards = m_searchUsesWildcards;
         m_previousMinSizeFilter = m_minSizeFilter;
         m_previousMaxSizeFilter = m_maxSizeFilter;
+        m_previousFilterParams = m_filterParams;
         rebuildCombinedMatchCache();
         emit searchResultsChanged();
         viewport()->update();
@@ -2999,11 +3058,32 @@ void TreemapWidget::rebuildSearchMatches()
         && (m_minSizeFilter >= m_previousMinSizeFilter)
         && (m_maxSizeFilter == 0 || m_previousMaxSizeFilter == 0
             || m_maxSizeFilter <= m_previousMaxSizeFilter);
-    const bool canIncremental = (sizeFilterUnchanged || sizeFilterNarrowed)
+    // Only use incremental search when none of the new filter dimensions changed.
+    const bool newFiltersUnchanged = m_filterParams.dateMin == m_previousFilterParams.dateMin
+        && m_filterParams.dateMax == m_previousFilterParams.dateMax
+        && m_filterParams.fileTypeGroups == m_previousFilterParams.fileTypeGroups
+        && m_filterParams.filesOnly == m_previousFilterParams.filesOnly
+        && m_filterParams.foldersOnly == m_previousFilterParams.foldersOnly
+        && m_filterParams.markFilter == m_previousFilterParams.markFilter;
+    const bool canIncremental = newFiltersUnchanged
+        && (sizeFilterUnchanged || sizeFilterNarrowed)
         && !m_searchUsesWildcards
         && !m_previousSearchUsesWildcards
         && !m_previousSearchCaseFoldedPattern.isEmpty()
         && m_searchCaseFoldedPattern.startsWith(m_previousSearchCaseFoldedPattern);
+
+    // Build file type ext key set on main thread (avoids settings access in background task).
+    std::unordered_set<uint64_t> fileTypeExtKeys;
+    if (!m_filterParams.fileTypeGroups.isEmpty()) {
+        for (const FileTypeGroup& group : m_settings.fileTypeGroups) {
+            if (m_filterParams.fileTypeGroups.contains(group.name)) {
+                for (const QString& ext : group.extensions) {
+                    const uint64_t key = ColorUtils::packFileExt(QStringLiteral("x.") + ext);
+                    if (key != 0) fileTypeExtKeys.insert(key);
+                }
+            }
+        }
+    }
 
     // Snapshot all inputs for the background task.
     m_pendingSearchIndex = m_searchIndex;
@@ -3017,6 +3097,11 @@ void TreemapWidget::rebuildSearchMatches()
     const qint64 sizeMin       = m_minSizeFilter;
     const qint64 sizeMax       = m_maxSizeFilter;
     const bool sizeActive      = m_sizeFilterActive;
+    const int64_t dateMin      = m_filterParams.dateMin;
+    const int64_t dateMax      = m_filterParams.dateMax;
+    const bool filesOnly       = m_filterParams.filesOnly;
+    const bool foldersOnly     = m_filterParams.foldersOnly;
+    const QSet<int> markFilter = m_filterParams.markFilter;
     std::vector<uint8_t> matchScratch = std::move(m_searchMatchScratch);
     std::vector<bool> reachScratch = std::move(m_searchReachScratch);
     auto cancelToken           = m_searchCancelToken; // shared ownership
@@ -3027,6 +3112,10 @@ void TreemapWidget::rebuildSearchMatches()
             inputNodes = std::move(incrementalNodes),
             pattern, patternUtf8, usesWildcards,
             sizeMin, sizeMax, sizeActive,
+            dateMin, dateMax,
+            fileTypeExtKeys = std::move(fileTypeExtKeys),
+            filesOnly, foldersOnly,
+            markFilter,
             matchScratch = std::move(matchScratch),
             reachScratch = std::move(reachScratch),
             cancelToken]() -> SearchMatchResult
@@ -3081,10 +3170,40 @@ void TreemapWidget::rebuildSearchMatches()
                 || ((sizeMin == 0 || node->size >= sizeMin)
                     && (sizeMax == 0 || node->size <= sizeMax));
 
-            if (patternOk && sizeOk) {
+            // Date match (files with unknown mtime=0 are excluded when date filter is active)
+            const bool dateOk = (dateMin == 0 && dateMax == 0)
+                || (node->mtime != 0
+                    && (dateMin == 0 || node->mtime >= dateMin)
+                    && (dateMax == 0 || node->mtime <= dateMax));
+
+            // File type match (applies to files only; dirs always pass)
+            const bool typeOk = fileTypeExtKeys.empty()
+                || (!node->isDirectory && fileTypeExtKeys.count(node->extKey) > 0);
+
+            // Files/folders-only mode
+            const bool modeOk = (!filesOnly || !node->isDirectory)
+                && (!foldersOnly || node->isDirectory);
+
+            // Mark filter: matches if node (or any ancestor) has a mark in the filter set.
+            bool markOk = markFilter.isEmpty();
+            bool markDirect = markFilter.isEmpty();
+            if (!markOk && node->id < index->markCache.size() && index->markCache[node->id] != 0xFF) {
+                if (markFilter.contains(static_cast<int>(index->markCache[node->id]))) {
+                    markOk = true;
+                    // It's a direct mark match if this node itself has a matching mark
+                    // (not just inherited from a parent).
+                    markDirect = node->id < index->directMarkCache.size() && index->directMarkCache[node->id];
+                }
+            }
+
+            if (patternOk && sizeOk && dateOk && typeOk && modeOk && markOk) {
                 result.directMatches.push_back(node);
                 if (node->id < result.matchCache.size()) {
-                    result.matchCache[node->id] |= kSearchSelfMatch;
+                    if (markDirect) {
+                        result.matchCache[node->id] |= kSearchSelfMatch;
+                    } else {
+                        result.matchCache[node->id] |= kSearchMarkMatch;
+                    }
                 }
             }
         }
@@ -3166,6 +3285,11 @@ void TreemapWidget::onSearchTaskFinished()
     m_previousSearchUsesWildcards = m_searchUsesWildcards;
     m_previousMinSizeFilter = m_minSizeFilter;
     m_previousMaxSizeFilter = m_maxSizeFilter;
+    m_previousFilterParams = m_filterParams;
+
+    if (m_filterParams.hideNonMatching) {
+        m_liveSplitCache.clear();
+    }
 
     rebuildCombinedMatchCache();
     emit searchResultsChanged();
@@ -3222,6 +3346,29 @@ void TreemapWidget::rebuildSearchMetadata()
     }
     m_searchIndex = buildSearchIndex(m_root);
     m_nodeCount = m_searchIndex->nodeCount;
+    // Populate mark cache (0xFF = no mark), then propagate to descendants.
+    if (!m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty()) {
+        m_searchIndex->markCache.assign(m_nodeCount, 0xFF);
+        for (FileNode* node : m_searchIndex->nodes) {
+            if (!node->isDirectory || node->id >= m_nodeCount) continue;
+            const QString path = node->computePath();
+            auto it = m_settings.folderColorMarks.constFind(path);
+            if (it != m_settings.folderColorMarks.constEnd()) {
+                m_searchIndex->markCache[node->id] = static_cast<uint8_t>(static_cast<int>(it.value()));
+                continue;
+            }
+            auto it2 = m_settings.folderIconMarks.constFind(path);
+            if (it2 != m_settings.folderIconMarks.constEnd()) {
+                m_searchIndex->markCache[node->id] = static_cast<uint8_t>(static_cast<int>(it2.value()));
+            }
+        }
+        // Propagate marks to all descendants (nodes are in DFS pre-order).
+        for (FileNode* node : m_searchIndex->nodes) {
+            if (!node->parent || node->parent->id >= m_nodeCount) continue;
+            if (node->id < m_nodeCount && m_searchIndex->markCache[node->id] == 0xFF)
+                m_searchIndex->markCache[node->id] = m_searchIndex->markCache[node->parent->id];
+        }
+    }
     m_searchMatchCache.assign(m_nodeCount, 0);
 }
 
@@ -3234,39 +3381,99 @@ void TreemapWidget::rebuildSearchMetadataAsync()
         return;
     }
 
+    // Cancel any in-flight metadata work. We also cancel the search because it depends
+    // on the metadata we're about to replace.
+    cancelPendingMetadata();
+    cancelPendingSearch();
+
     FileNode* const root = m_root;
     const std::shared_ptr<NodeArena> rootArena = m_rootArena;
-    auto cancelToken = m_searchCancelToken;
+    const QString rootPath = root->absolutePath;
+    auto cancelToken = m_metadataCancelToken;
+    // Snapshot marks on main thread; looked up by path inside the background task.
+    const QHash<QString, FolderMark> colorMarkSnapshot = m_settings.folderColorMarks;
+    const QHash<QString, FolderMark> iconMarkSnapshot  = m_settings.folderIconMarks;
 
     m_metadataWatcher->setFuture(QtConcurrent::run(
-        [root, rootArena, cancelToken]() -> std::shared_ptr<SearchIndex>
+        [root, rootPath, rootArena, cancelToken, colorMarkSnapshot, iconMarkSnapshot]()
+            -> std::shared_ptr<SearchIndex>
     {
         if (!rootArena) {
             return {};
         }
         auto index = std::make_shared<SearchIndex>();
-        std::vector<FileNode*> stack;
-        stack.push_back(root);
+        struct StackEntry {
+            FileNode* node;
+            QString path;
+        };
+        std::vector<StackEntry> stack;
+        stack.push_back({root, rootPath});
+
         int i = 0;
         while (!stack.empty()) {
             if ((++i & 0xFFF) == 0 && cancelToken->load(std::memory_order_relaxed)) {
                 return {};
             }
-            FileNode* node = stack.back();
+            StackEntry entry = stack.back();
             stack.pop_back();
-            if (!node || node->isVirtual) continue;
+            FileNode* node = entry.node;
+            if (!node) continue;
 
-            node->id = index->nodeCount++;
-            index->nodes.push_back(node);
-            index->nameOffsets.push_back(static_cast<uint32_t>(index->flatNames.size()));
-            const QByteArray folded = node->name.toCaseFolded().toUtf8();
-            index->nameLens.push_back(static_cast<uint16_t>(std::min<int>(folded.size(), 65535)));
-            index->flatNames.append(folded.constData(), folded.size());
-            if (!node->isDirectory) {
-                index->filesByExt[node->extKey].push_back(node);
+            if (!node->isVirtual) {
+                node->id = index->nodeCount++;
+                index->nodes.push_back(node);
+                index->nameOffsets.push_back(static_cast<uint32_t>(index->flatNames.size()));
+                const QByteArray folded = node->name.toCaseFolded().toUtf8();
+                index->nameLens.push_back(static_cast<uint16_t>(std::min<int>(folded.size(), 65535)));
+                index->flatNames.append(folded.constData(), folded.size());
+                if (!node->isDirectory) {
+                    index->filesByExt[node->extKey].push_back(node);
+                }
+
+                // Propagate marks down the tree.
+                if (!index->markCache.empty() || !colorMarkSnapshot.isEmpty() || !iconMarkSnapshot.isEmpty()) {
+                    if (index->markCache.size() < index->nodeCount) {
+                        index->markCache.resize(index->nodeCount, 0xFF);
+                        index->directMarkCache.resize(index->nodeCount, false);
+                    }
+
+                    uint8_t mark = 0xFF;
+                    bool direct = false;
+                    if (node->isDirectory) {
+                        auto it = colorMarkSnapshot.constFind(entry.path);
+                        if (it != colorMarkSnapshot.constEnd()) {
+                            mark = static_cast<uint8_t>(static_cast<int>(it.value()));
+                            direct = true;
+                        } else {
+                            auto it2 = iconMarkSnapshot.constFind(entry.path);
+                            if (it2 != iconMarkSnapshot.constEnd()) {
+                                mark = static_cast<uint8_t>(static_cast<int>(it2.value()));
+                                direct = true;
+                            }
+                        }
+                    }
+
+                    // If this node doesn't have a direct mark, it inherits from its parent.
+                    if (mark == 0xFF && node->parent && node->parent->id < index->markCache.size()) {
+                        mark = index->markCache[node->parent->id];
+                    }
+                    index->markCache[node->id] = mark;
+                    index->directMarkCache[node->id] = direct;
+                }
             }
+
             for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
-                stack.push_back(*it);
+                FileNode* child = *it;
+                if (!child) continue;
+                QString childPath = entry.path;
+                if (!node->isVirtual) {
+                    if (!childPath.endsWith(QLatin1Char('/'))) childPath += QLatin1Char('/');
+                    childPath += child->name;
+                } else if (!child->absolutePath.isEmpty()) {
+                    // If parent is virtual (like a multi-root container), child might have its own absolutePath
+                    childPath = child->absolutePath;
+                }
+                stack.push_back({child, childPath});
             }
         }
 
@@ -3427,23 +3634,24 @@ void TreemapWidget::rebuildCombinedMatchCache()
 
 void TreemapWidget::setSizeFilter(qint64 minBytes, qint64 maxBytes)
 {
-    const bool wasActive = m_sizeFilterActive;
-    const bool newActive = (minBytes > 0 || maxBytes > 0);
-
-    if (newActive == wasActive && m_minSizeFilter == minBytes && m_maxSizeFilter == maxBytes) {
-        return;
-    }
-
-    clearHoverState(false);
-    m_minSizeFilter = minBytes;
-    m_maxSizeFilter = maxBytes;
-    m_sizeFilterActive = newActive;
-    m_searchActive = !m_searchPattern.isEmpty() || m_sizeFilterActive;
-
-    rebuildSearchMatches();
-    viewport()->update();
+    FilterParams p = m_filterParams;
+    p.sizeMin = minBytes;
+    p.sizeMax = maxBytes;
+    setFilterParams(p);
 }
 
+
+bool TreemapWidget::isDescendantOfDirectMatch(const FileNode* node) const
+{
+    // Check if the node or any ancestor is a direct match for the current active filters.
+    // kSearchSelfMatch and kTypeSelfMatch both use 0x1.
+    for (const FileNode* p = node; p; p = p->parent) {
+        if (effectiveMatchFlags(p) & 0x01) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool TreemapWidget::isDescendantOf(const FileNode* node, const FileNode* ancestor) const
 {
@@ -3584,6 +3792,19 @@ void TreemapWidget::layoutVisibleChildren(FileNode* node, const QRectF& tileView
                 total += child->size;
             }
         }
+        // When "hide non-matching" is active, exclude children with no match from layout.
+        if (m_filterParams.hideNonMatching && m_filterParams.isActive()) {
+            // Include children if they match, OR if this node (or any ancestor) is a direct match.
+            if (!isDescendantOfDirectMatch(node)) {
+                children.erase(std::remove_if(children.begin(), children.end(),
+                    [this](const FileNode* c) { return effectiveMatchFlags(c) == 0; }),
+                    children.end());
+                total = 0;
+                for (const auto* c : children) total += c->size;
+                for (const auto* c : freeChildren) total += c->size;
+            }
+        }
+
         if ((children.empty() && freeChildren.empty()) || total <= 0) {
             return;
         }
@@ -3824,7 +4045,14 @@ QSizeF TreemapWidget::stabilizedNodeSize(const FileNode* node, StableMetricChann
 bool TreemapWidget::canPaintChildrenForDisplay(const FileNode* node, const QRectF& viewBounds, int depth) const
 {
     if (depth >= m_activeSemanticDepth) {
-        return false;
+        // If "hide non-matching" is active, we allow recursing much deeper because 
+        // the number of items is restricted by the filter.
+        if (!(m_filterParams.hideNonMatching && m_searchActive)) {
+            return false;
+        }
+        if (depth >= m_settings.maxSemanticDepth) {
+            return false;
+        }
     }
 
     const RevealThresholds thresholds = revealThresholds(m_settings);
@@ -4139,9 +4367,11 @@ void TreemapWidget::drawMatchOverlay(QPainter& painter, FileNode* root, const QR
     painter.setPen(Qt::NoPen);
     paintMatchOverlayNode(painter, root, -1, clip, currentRootViewRect());
     // Use searchMatchFlags for borders as they represent the primary focus.
-    paintMatchBordersNode(painter, root, -1, clip, currentRootViewRect(),
-                          [this](const FileNode* n) { return searchMatchFlags(n); },
-                          kSearchSelfMatch);
+    if (!(m_filterParams.hideNonMatching && m_searchActive)) {
+        paintMatchBordersNode(painter, root, -1, clip, currentRootViewRect(),
+                              [this](const FileNode* n) { return searchMatchFlags(n); },
+                              kSearchSelfMatch);
+    }
     painter.restore();
 }
 
@@ -4506,11 +4736,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             }
 
             if (depth >= 0 && layer != SceneRenderLayer::StaticOnly) {
-                const QColor baseContrast = contrastingTextColor(effectiveHeaderColor);
-                const QColor hoverContrast = contrastingTextColor(hoverBase);
-                const QColor headerTextColor = nodeHoverStrength > 0.0
-                    ? blendColors(baseContrast, hoverContrast, nodeHoverStrength)
-                    : baseContrast;
+                const QColor headerTextColor = contrastingTextColor(effectiveHeaderColor);
                 const QString sizeText = cachedSizeLabel(node);
                 const QString headerText = QString("%1  %2").arg(node->name, sizeText);
                 constexpr qreal kHeaderTextInset = 3.0;
@@ -4576,8 +4802,11 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             p.setOpacity(baseOpacity * tileRevealOpacity);
             // Highlight border matches header/hoverBase exactly
             const QColor highlightBorderBase = hoverBase;
+            const qreal clampedBorderIntensity = std::clamp(m_settings.borderIntensity, 0.0, 1.0);
+            const QColor contrastBorder = contrastingBorderColor(colorBg);
             const QColor effectiveBorderColor = highlightBorderStrength > 0.0
-                ? blendColors(outerBorderBase, highlightBorderBase, highlightBorderStrength)
+                ? opaqueCompositeColor(blendColors(outerBorderBase, highlightBorderBase, highlightBorderStrength),
+                                       blendColors(Qt::transparent, contrastBorder, clampedBorderIntensity))
                 : outerBorderBase;
             p.setClipRect(directoryState.tileRect, Qt::IntersectClip);
             fillInnerBorder(p, directoryState.tileRect, effectiveBorderColor, outlineWidth);
@@ -4697,8 +4926,10 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             const QColor fileBorderBase = blendColors(fc, vibrantFileTarget, clampedBorderIntensity);
 
             const QColor highlightBorderBase = hoverBase;
+            const QColor contrastBorder = contrastingBorderColor(fillColor);
             const QColor fileBorderColor = bgHighlightStrength > 0.0
-                ? blendColors(fileBorderBase, highlightBorderBase, bgHighlightStrength)
+                ? opaqueCompositeColor(blendColors(fileBorderBase, highlightBorderBase, bgHighlightStrength),
+                                       blendColors(Qt::transparent, contrastBorder, clampedBorderIntensity))
                 : fileBorderBase;
 
             QColor effectiveFileBorderColor = fileBorderColor;
@@ -4748,12 +4979,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
         if (textFade > 0.0 && layer != SceneRenderLayer::StaticOnly) {
             // Replace nested save/restore with direct opacity arithmetic — the outer
             // file p.save()/p.restore() already guards all state for the caller.
-            const QColor baseContrast = contrastingTextColor(fc);
-            const QColor hoverContrast = contrastingTextColor(hoverBase);
-            const QColor rawFileTextColor = bgHighlightStrength > 0.0
-                ? blendColors(baseContrast, hoverContrast, bgHighlightStrength)
-                : baseContrast;
-
+            const QColor rawFileTextColor = contrastingTextColor(fillColor);
             const QColor fileTextColor = finalThumbnailAlpha > 0.4 ? Qt::white : rawFileTextColor;
 
             p.setOpacity(baseOpacity * tileRevealOpacity * textFade);

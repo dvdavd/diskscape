@@ -64,6 +64,7 @@ struct FileNode {
     uint32_t id = UINT32_MAX; // assigned by rebuildSearchMetadata(); UINT32_MAX = unnumbered/virtual
     bool isDirectory = false;
     bool isVirtual = false;   // for "Free Space" synthetic node
+    int64_t mtime = 0;        // seconds since Unix epoch; 0 = unknown
 
     // Returns the full absolute path. The root stores it directly; descendants
     // reconstruct it from the parent chain to avoid per-directory path storage.
@@ -80,6 +81,11 @@ struct FileNode {
         }
         return name;
     }
+};
+
+struct FileNodeStats {
+    int fileCount = 0;
+    qint64 totalSize = 0;
 };
 
 // Bump/arena allocator for FileNode.

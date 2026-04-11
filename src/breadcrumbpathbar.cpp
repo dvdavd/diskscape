@@ -224,8 +224,7 @@ void BreadcrumbPathBar::refreshLayoutMetrics()
         return;
     }
 
-    const bool fusion = usesFusionStyle(this);
-    m_fieldFrame->layout()->setContentsMargins(6, fusion ? 1 : 2, 4, fusion ? 3 : 2);
+    m_fieldFrame->layout()->setContentsMargins(6, 4, 4, 4);
     updateGeometry();
 }
 
@@ -246,7 +245,7 @@ void BreadcrumbPathBar::refreshChromeStyles()
         "  border: 1px solid transparent;"
         "  border-radius: 5px;"
         "  background: transparent;"
-        "  padding: 2px 6px;"
+        "  padding: 1px 6px 3px 6px;"
         "  margin: 0;"
         "}"
         "QToolButton:hover {"
@@ -260,7 +259,7 @@ void BreadcrumbPathBar::refreshChromeStyles()
         "QLineEdit {"
         "  border: none;"
         "  background: transparent;"
-        "  padding: 0 6px;"
+        "  padding: 0 6px 2px 6px;"
         "}"
         "QLabel {"
         "  background: transparent;"
@@ -365,7 +364,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  background: transparent;"
                 "  border: 1px solid transparent;"
                 "  border-radius: 4px;"
-                "  padding: 0px 2px;"
+                "  padding: 0px 2px 2px 2px;"
                 "}"
                 "QToolButton:hover {"
                 "  border-color: palette(highlight);"
@@ -381,7 +380,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  background: transparent;"
                 "  border: 1px solid transparent;"
                 "  border-radius: 4px;"
-                "  padding: 0px 2px;"
+                "  padding: 0px 2px 2px 2px;"
                 "}"
                 "QToolButton:hover {"
                 "  color: palette(button-text);"
@@ -413,7 +412,7 @@ void BreadcrumbPathBar::rebuildCrumbs()
                 "  color: palette(window-text);"
                 "  border: 1px solid transparent;"
                 "  border-radius: 3px;"
-                "  padding: 0px;"
+                "  padding: 0px 0px 2px 0px;"
                 "}"
                 "QToolButton:hover {"
                 "  border-color: palette(highlight);"

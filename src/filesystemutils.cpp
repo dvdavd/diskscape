@@ -26,7 +26,15 @@ bool isLocalFilesystem(QStringView fileSystemType, const QByteArray& device, QSt
     if (matchesAnyFsType(fsType, {"CIFS", "NFS", "SMBFS", "NETFS"})) {
         return false;
     }
-    return !device.startsWith("\\\\");
+    if (device.startsWith("\\\\")) {
+        // UNC paths like \\server\share are remote.
+        // But Win32 device namespaces like \\?\Volume{...}\ or \\.\ are local.
+        if (device.startsWith("\\\\?\\") || device.startsWith("\\\\.\\")) {
+            return true;
+        }
+        return false;
+    }
+    return true;
 #else
     if (matchesAnyFsType(fsType, {"NFS", "NFS4", "CIFS", "SMBFS", "AFPFS",
                                   "WEBDAV", "DAVFS", "9P", "9P2000.L",

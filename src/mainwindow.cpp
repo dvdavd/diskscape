@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "mainwindow.h"
 #include "breadcrumbpathbar.h"
+#include "searchfilterpanel.h"
 #include "platformthemewatcher.h"
 #include "colorutils.h"
 #include "filesystemwatchcontroller.h"
@@ -736,12 +737,18 @@ void MainWindow::setupToolbar(QSettings& store)
 
     m_toolbar->addSeparator();
 
-    QIcon settingsIcon = toolbarIcon({"settings-configure", "preferences-system"},
-        QStringLiteral(":/assets/tabler-icons/settings.svg"));
-    m_settingsAction = m_toolbar->addAction(settingsIcon, tr("Settings"));
-    m_settingsAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+,")), QKeySequence(QStringLiteral("Ctrl+Alt+,"))});
-    setActionTooltip(m_settingsAction, tr("Open application settings"));
-    connect(m_settingsAction, &QAction::triggered, this, &MainWindow::openSettings);
+    m_toggleFilterPanelAction = m_toolbar->addAction(
+        toolbarIcon({"system-search", "filter"},
+            QStringLiteral(":/assets/tabler-icons/filter.svg")),
+        tr("Filter"));
+    m_toggleFilterPanelAction->setCheckable(true);
+    m_toggleFilterPanelAction->setChecked(false);
+    m_toggleFilterPanelAction->setEnabled(false);
+    m_toggleFilterPanelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+F")));
+    setActionTooltip(m_toggleFilterPanelAction, tr("Show or hide the search filter panel"));
+    if (QToolButton* filterButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_toggleFilterPanelAction))) {
+        filterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
 
     m_clearMarksAction = new QAction(tr("Clear All Marked Folders"), this);
     m_clearMarksAction->setIcon(menuActionIcon({"bookmark-remove"},
@@ -833,52 +840,17 @@ void MainWindow::setupToolbar(QSettings& store)
     searchSpacer->setFocusPolicy(Qt::NoFocus);
     m_toolbar->addWidget(searchSpacer);
 
-    m_searchEdit = new QLineEdit(this);
-    m_searchEdit->installEventFilter(this);
-    m_searchEdit->setClearButtonEnabled(true);
-    m_searchEdit->setPlaceholderText(searchPatternPlaceholderText());
-    m_searchEdit->setFixedWidth(190);
-    m_searchEdit->setToolTip(tr("Type a filename pattern and press Enter to search"));
-    connect(m_searchEdit, &QLineEdit::returnPressed, this, &MainWindow::applySearchFromToolbar);
-    connect(m_searchEdit, &QLineEdit::textChanged, this, [this](const QString& text) {
-        if (!m_treemapWidget) {
-            return;
-        }
-        if (text.trimmed().isEmpty()) {
-            if (m_searchDebounceTimer) m_searchDebounceTimer->stop();
-            m_treemapWidget->setSearchPattern(QString());
-            setSearchBusy(false);
-            return;
-        }
-        if (m_searchDebounceTimer) m_searchDebounceTimer->start();
-    });
-    m_toolbar->addWidget(m_searchEdit);
+    QIcon settingsIcon = toolbarIcon({"settings-configure", "preferences-system"},
+        QStringLiteral(":/assets/tabler-icons/settings.svg"));
+    m_settingsAction = m_toolbar->addAction(settingsIcon, tr("Settings"));
+    m_settingsAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+,")), QKeySequence(QStringLiteral("Ctrl+Alt+,"))});
+    setActionTooltip(m_settingsAction, tr("Open application settings"));
+    connect(m_settingsAction, &QAction::triggered, this, &MainWindow::openSettings);
+    if (QToolButton* settingsButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_settingsAction))) {
+        settingsButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
 
-    auto* sizeFilterSpacer = new QWidget(this);
-    sizeFilterSpacer->setFixedWidth(6);
-    sizeFilterSpacer->setFocusPolicy(Qt::NoFocus);
-    m_toolbar->addWidget(sizeFilterSpacer);
-
-    m_sizeFilterCombo = new QComboBox(this);
-    m_sizeFilterCombo->installEventFilter(this);
-    m_sizeFilterCombo->setToolTip(tr("Filter by file/folder size"));
-    m_sizeFilterCombo->addItem(tr("Any size"),        QVariantList{0LL, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 1 MB"),     QVariantList{1LL<<20, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 10 MB"),    QVariantList{10LL<<20, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 100 MB"),   QVariantList{100LL<<20, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 1 GB"),     QVariantList{1LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 5 GB"),     QVariantList{5LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 10 GB"),    QVariantList{10LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 20 GB"),    QVariantList{20LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 50 GB"),    QVariantList{50LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 100 GB"),   QVariantList{100LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 500 GB"),   QVariantList{500LL<<30, 0LL});
-    m_sizeFilterCombo->addItem(tr("\u2265 1 TB"),     QVariantList{1LL<<40, 0LL});
-    connect(m_sizeFilterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::applySearchFromToolbar);
-    updateSizeFilterChrome();
     updatePathBarChrome();
-    m_toolbar->addWidget(m_sizeFilterCombo);
 
     auto* menuSpacer = new QWidget(this);
     menuSpacer->setFixedWidth(10);
@@ -1029,6 +1001,14 @@ void MainWindow::setupCentralWidget(QSettings& store)
     m_pathBar->setParent(m_treemapPage);
     treemapPageLayout->addWidget(m_pathBar);
 
+    m_filterPanel = new SearchFilterPanel(m_treemapPage);
+    m_filterPanel->hide();
+    treemapPageLayout->addWidget(m_filterPanel);
+    connect(m_filterPanel, &SearchFilterPanel::filterParamsChanged,
+            this, [this](const FilterParams& p) {
+        if (m_treemapWidget) m_treemapWidget->setFilterParams(p);
+    });
+
     m_directoryPanel = new QWidget(m_treemapPage);
     m_directoryPanel->setObjectName(QStringLiteral("directoryPanel"));
     m_directoryPanel->setMinimumWidth(0);
@@ -1076,10 +1056,10 @@ void MainWindow::setupCentralWidget(QSettings& store)
 
     m_treemapWidget = new TreemapWidget(m_treemapPane);
     m_treemapWidget->applySettings(m_settings);
-    m_treemapWidget->setSearchPattern(m_searchEdit ? m_searchEdit->text() : QString());
     treemapPaneLayout->addWidget(m_treemapWidget, 1);
     connect(m_treemapWidget, &TreemapWidget::searchResultsChanged,
             this, [this]() {
+                updateCompletedStatusLabels();
                 refreshTypeLegendAsync(m_treemapWidget ? m_treemapWidget->currentNode()
                                                        : m_scanResult.root);
             });
@@ -1138,6 +1118,14 @@ void MainWindow::setupCentralWidget(QSettings& store)
     applyComfortableItemSpacing(m_permissionErrorList);
     permissionErrorLayout->addWidget(m_permissionErrorList, 1);
 
+    connect(m_toggleFilterPanelAction, &QAction::toggled, this, [this](bool checked) {
+        if (m_filterPanel) {
+            m_filterPanel->setVisible(checked);
+            if (m_treemapWidget) {
+                m_treemapWidget->setFilterParams(checked ? m_filterPanel->currentParams() : FilterParams{});
+            }
+        }
+    });
     connect(m_toggleDirectoryTreeAction, &QAction::toggled, this, [this](bool checked) {
         m_showDirectoryTree = checked;
         rebuildTreemapSplitterLayout();
@@ -1375,12 +1363,6 @@ void MainWindow::setupBackend()
     connect(m_postProcessWatcher, &QFutureWatcher<IncrementalRefreshResult>::finished,
             this, &MainWindow::onPostProcessFinished);
 
-    m_searchDebounceTimer = new QTimer(this);
-    m_searchDebounceTimer->setSingleShot(true);
-    m_searchDebounceTimer->setInterval(150);
-    connect(m_searchDebounceTimer, &QTimer::timeout,
-            this, &MainWindow::applySearchFromToolbar);
-
     m_themeSettleTimer = new QTimer(this);
     m_themeSettleTimer->setSingleShot(true);
     m_themeSettleTimer->setInterval(0);
@@ -1443,7 +1425,7 @@ void MainWindow::clearCompletedStatusLabels()
 
 void MainWindow::updateCompletedStatusLabels()
 {
-    if (!m_scanResult.root || !m_treemapWidget) {
+    if (!m_treemapWidget) {
         clearCompletedStatusLabels();
         return;
     }
@@ -1455,7 +1437,7 @@ void MainWindow::updateCompletedStatusLabels()
     }
 
     const QLocale locale = QLocale::system();
-    const FileNodeStats currentStats = fileNodeStats(current);
+    const FileNodeStats currentStats = m_treemapWidget->filteredStats(current);
     if (m_completedFilesStatusLabel) {
         m_completedFilesStatusLabel->setText(tr("Files: %1").arg(locale.toString(currentStats.fileCount)));
         m_completedFilesStatusLabel->setVisible(true);
@@ -1465,7 +1447,8 @@ void MainWindow::updateCompletedStatusLabels()
         m_completedTotalStatusLabel->setVisible(true);
     }
     if (m_completedFreeStatusLabel) {
-        const qint64 freeBytes = freeBytesForNodeView(m_scanResult, current);
+        const ScanResult& sr = m_scanInProgress ? m_liveScanResult : m_scanResult;
+        const qint64 freeBytes = freeBytesForNodeView(sr, current);
         if (freeBytes >= 0) {
             m_completedFreeStatusLabel->setText(tr("Free: %1").arg(locale.formattedDataSize(freeBytes)));
             m_completedFreeStatusLabel->setVisible(true);
@@ -1491,19 +1474,6 @@ void MainWindow::updateToolbarChrome()
     m_toolbar->setPalette(QPalette());
 }
 
-void MainWindow::updateSizeFilterChrome()
-{
-    if (!m_sizeFilterCombo) {
-        return;
-    }
-
-    const QPalette palette = qApp ? qApp->palette() : QApplication::palette();
-    m_sizeFilterCombo->setPalette(palette);
-    if (QAbstractItemView* popupView = m_sizeFilterCombo->view()) {
-        popupView->setPalette(palette);
-    }
-    m_sizeFilterCombo->setStyleSheet(QString());
-}
 
 void MainWindow::changeEvent(QEvent* event)
 {
@@ -1563,22 +1533,6 @@ void MainWindow::onThemeSettled()
         updateToolbarResponsiveLayout();
     }
 
-    if (m_sizeFilterCombo) {
-        const QPalette palette = qApp ? qApp->palette() : QApplication::palette();
-        m_sizeFilterCombo->setPalette(palette);
-        updateSizeFilterChrome();
-        m_sizeFilterCombo->style()->unpolish(m_sizeFilterCombo);
-        m_sizeFilterCombo->style()->polish(m_sizeFilterCombo);
-        if (QAbstractItemView* popupView = m_sizeFilterCombo->view()) {
-            popupView->setPalette(palette);
-            popupView->style()->unpolish(popupView);
-            popupView->style()->polish(popupView);
-            popupView->viewport()->update();
-        }
-        m_sizeFilterCombo->updateGeometry();
-        m_sizeFilterCombo->update();
-    }
-
     if (m_directoryTree) {
         applyComfortableItemSpacing(m_directoryTree);
         for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i) {
@@ -1608,7 +1562,6 @@ void MainWindow::applyThemeChange(bool darkMode, bool treemapDark)
     updatePathBarChrome();
     updateLandingPageChrome();
     updateToolbarChrome();
-    updateSizeFilterChrome();
     clearIconCaches();
     updateToolbarIcons();
     if (m_themeSettleTimer)
@@ -1634,7 +1587,7 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event)
 {
-    if ((watched == m_searchEdit || watched == m_sizeFilterCombo || watched == m_pathBar)
+    if ((watched == m_pathBar)
             && (event->type() == QEvent::FontChange
                 || event->type() == QEvent::ApplicationFontChange
                 || event->type() == QEvent::StyleChange
@@ -1768,31 +1721,22 @@ void MainWindow::setLandingVisible(bool visible)
     }
 
     if (visible) {
-        if (m_searchDebounceTimer) {
-            m_searchDebounceTimer->stop();
+        if (m_filterPanel) {
+            m_filterPanel->clearAll();
+            m_filterPanel->setEnabled(false);
         }
-        if (m_searchEdit) {
-            QSignalBlocker blocker(m_searchEdit);
-            m_searchEdit->clear();
-            m_searchEdit->setClearButtonEnabled(false);
-            m_searchEdit->setEnabled(false);
-        }
-        if (m_sizeFilterCombo) {
-            QSignalBlocker blocker(m_sizeFilterCombo);
-            m_sizeFilterCombo->setCurrentIndex(0);
-            m_sizeFilterCombo->setEnabled(false);
+        if (m_toggleFilterPanelAction) {
+            m_toggleFilterPanelAction->setEnabled(false);
         }
         if (m_treemapWidget) {
-            m_treemapWidget->setSizeFilter(0, 0);
-            m_treemapWidget->setSearchPattern(QString());
+            m_treemapWidget->setFilterParams(FilterParams{});
         }
     } else {
-        if (m_searchEdit) {
-            m_searchEdit->setClearButtonEnabled(true);
-            m_searchEdit->setEnabled(true);
+        if (m_filterPanel) {
+            m_filterPanel->setEnabled(true);
         }
-        if (m_sizeFilterCombo) {
-            m_sizeFilterCombo->setEnabled(true);
+        if (m_toggleFilterPanelAction) {
+            m_toggleFilterPanelAction->setEnabled(true);
         }
     }
 
@@ -2209,6 +2153,10 @@ void MainWindow::onScanProgress(ScanResult scanResult)
         return;
     }
 
+    const ViewStatePaths previousViewPaths = m_treemapWidget
+        ? captureViewStatePaths(m_treemapWidget->currentViewState())
+        : ViewStatePaths{};
+
     m_liveScanResult = std::move(scanResult);
 
     // Live preview snapshots already preserve the scanner-assigned colors.
@@ -2218,11 +2166,20 @@ void MainWindow::onScanProgress(ScanResult scanResult)
     m_treemapWidget->setScanInProgress(true);
     m_treemapWidget->setRoot(m_liveScanResult.root, m_liveScanResult.arena, false, false);
 
+    if (m_treemapWidget && !previousViewPaths.nodePath.isEmpty()) {
+        const TreemapWidget::ViewState remappedView =
+            remapViewStatePaths(previousViewPaths, m_liveScanResult.root);
+        if (remappedView.node) {
+            m_treemapWidget->restoreViewStateImmediate(remappedView);
+        }
+    }
+
     m_latestScannedBytes = std::max(m_latestScannedBytes, m_liveScanResult.root->size);
     if (!m_liveScanResult.currentScanPath.isEmpty()) {
         m_latestScanActivityPath = m_liveScanResult.currentScanPath;
     }
     updateScanStatusMessage();
+    updateNavigationActions();
 }
 
 void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
@@ -2743,6 +2700,8 @@ void MainWindow::onScanFinished()
         updateCurrentViewUi();
     }
 
+    if (m_filterPanel) m_filterPanel->setSettings(m_settings);
+
     scheduleTreeMaintenance();
     m_liveScanResult = {};
     m_dirtyPaths.clear();
@@ -3006,6 +2965,7 @@ void MainWindow::markFolder(FileNode* node, FolderMark mark)
     m_settings.sanitize();
     saveSettingsAsync([settings = m_settings](QSettings& store) { settings.save(store); });
     if (m_treemapWidget) m_treemapWidget->applySettings(m_settings);
+    if (m_treemapWidget) m_treemapWidget->refreshSearchIndex();
     m_clearMarksAction->setEnabled(
         !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
     if (isFolderColorMark(mark) || mark == FolderMark::None) {
@@ -3022,6 +2982,7 @@ void MainWindow::clearAllMarkedFolders()
     m_settings.folderColorMarks.clear();
     m_settings.folderIconMarks.clear();
     applyTreemapSettings(m_settings, true);
+    if (m_treemapWidget) m_treemapWidget->refreshSearchIndex();
 }
 
 void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool persist)
@@ -3062,6 +3023,7 @@ void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool pers
     if (m_treemapWidget) {
         m_treemapWidget->applySettings(m_settings);
     }
+    if (m_filterPanel) m_filterPanel->setSettings(m_settings);
     m_clearMarksAction->setEnabled(
         !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
     recolorCurrentTree();
@@ -3647,13 +3609,13 @@ void MainWindow::updateNavigationActions()
     m_backAction->setEnabled(navigationEnabled && (previewOpen || !m_history.empty()));
     m_upAction->setEnabled(navigationEnabled && current && current->parent != nullptr);
     if (m_zoomInAction) {
-        m_zoomInAction->setEnabled(navigationEnabled && current);
+        m_zoomInAction->setEnabled(current != nullptr);
     }
     if (m_zoomOutAction) {
-        m_zoomOutAction->setEnabled(navigationEnabled && current);
+        m_zoomOutAction->setEnabled(current != nullptr);
     }
     if (m_resetZoomAction) {
-        m_resetZoomAction->setEnabled(navigationEnabled && current);
+        m_resetZoomAction->setEnabled(current != nullptr);
     }
     if (m_toggleFreeSpaceAction) {
         const bool hasFreeSpaceNode = m_scanResult.root && !m_freeSpaceNodes.empty();
@@ -3663,6 +3625,7 @@ void MainWindow::updateNavigationActions()
         m_toggleFreeSpaceAction->setChecked(m_showFreeSpaceInOverview);
         m_toggleFreeSpaceAction->blockSignals(false);
     }
+    updateCompletedStatusLabels();
     updateToolbarResponsiveLayout();
 }
 
@@ -4202,42 +4165,17 @@ void MainWindow::setSearchBusy(bool busy)
     const bool landingVisible = m_centralStack && m_landingPage
         && m_centralStack->currentWidget() == m_landingPage;
     const bool blockSearchControls = landingVisible || (m_scanInProgress && !m_backgroundRefreshInProgress);
-    if (m_searchEdit) {
-        m_searchEdit->setEnabled(!busy && !blockSearchControls);
+    if (m_filterPanel) {
+        m_filterPanel->setEnabled(!blockSearchControls);
     }
-    if (m_sizeFilterCombo) {
-        m_sizeFilterCombo->setEnabled(!blockSearchControls);
+    if (m_toggleFilterPanelAction) {
+        m_toggleFilterPanelAction->setEnabled(!blockSearchControls);
     }
     if (m_searchStatusLabel) {
         m_searchStatusLabel->setVisible(busy);
     }
 }
 
-void MainWindow::applySearchFromToolbar()
-{
-    if (m_searchDebounceTimer) m_searchDebounceTimer->stop();
-
-    if (!m_treemapWidget || !m_searchEdit) {
-        return;
-    }
-
-    // Extract size filter bounds from the combo box.
-    qint64 sizeMin = 0, sizeMax = 0;
-    if (m_sizeFilterCombo) {
-        const QVariantList bounds = m_sizeFilterCombo->currentData().toList();
-        if (bounds.size() == 2) {
-            sizeMin = bounds[0].toLongLong();
-            sizeMax = bounds[1].toLongLong();
-        }
-    }
-    // Apply size filter first to avoid double rebuild when pattern also changes.
-    m_treemapWidget->setSizeFilter(sizeMin, sizeMax);
-
-    const QString pattern = m_searchEdit->text().trimmed();
-    m_treemapWidget->setSearchPattern(pattern);
-    setSearchBusy(false);
-    updateCurrentViewUi();
-}
 
 void MainWindow::finalizeIncrementalRefresh(IncrementalRefreshResult refreshed)
 {
