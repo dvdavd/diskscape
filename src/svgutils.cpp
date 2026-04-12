@@ -59,10 +59,20 @@ static QPixmap renderSvgToPixmap(QSvgRenderer& renderer, int logicalSize, qreal 
 
 QIcon makeRecoloredSvgIcon(const QString& svgPath, const QColor& color)
 {
-    const QColor disabledColor = qApp
+    QColor disabledColor = qApp
         ? qApp->palette().color(QPalette::Disabled, QPalette::ButtonText)
         : color;
+
+    // On macOS, the disabled palette color is often identical to the active one
+    // because the OS expects to handle dimming. Since we are baking colors into
+    // pixmaps, we must ensure they are actually different.
+    if (disabledColor == color) {
+        disabledColor = color;
+        disabledColor.setAlpha(disabledColor.alpha() / 2);
+    }
+
     const QString key = svgPath + QLatin1Char(':')
+
         + color.name(QColor::HexArgb) + QLatin1Char(':')
         + disabledColor.name(QColor::HexArgb);
     auto it = s_recoloredSvgCache.find(key);
@@ -76,7 +86,15 @@ QIcon makeRecoloredSvgIcon(const QString& svgPath, const QColor& color)
 
     auto recolor = [&](const QColor& c) {
         QByteArray data = svgTemplate;
-        data.replace(QByteArrayLiteral("currentColor"), c.name(QColor::HexRgb).toUtf8());
+        const QByteArray hex = c.name(QColor::HexRgb).toUtf8();
+        data.replace(QByteArrayLiteral("currentColor"), hex);
+
+        if (c.alphaF() < 0.99) {
+            const QByteArray opacity = QByteArrayLiteral(" opacity=\"")
+                                          + QByteArray::number(c.alphaF(), 'f', 2)
+                                          + QByteArrayLiteral("\"");
+            data.replace(QByteArrayLiteral("<svg"), QByteArrayLiteral("<svg") + opacity);
+        }
         return data;
     };
 
@@ -96,6 +114,10 @@ QIcon makeRecoloredSvgIcon(const QString& svgPath, const QColor& color)
             icon.addPixmap(renderSvgToPixmap(disabledRenderer, logicalSize, dpr), QIcon::Disabled);
         }
     }
+
+#ifdef Q_OS_MACOS
+    icon.setIsMask(true);
+#endif
 
     s_recoloredSvgCache.insert(key, icon);
     return icon;

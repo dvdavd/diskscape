@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(diskscape VERSION 0.9.24 LANGUAGES CXX)
+project(diskscape VERSION 0.9.25 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,12 +29,22 @@ else()
     set(SCANNER_BACKEND_SRC src/scanner_posix.cpp)
 endif()
 
+if (WIN32)
+    set(THUMBNAIL_SRC src/thumbnailprovider_win32.cpp)
+elseif (APPLE)
+    set(THUMBNAIL_SRC src/thumbnailprovider_macos.mm)
+else()
+    set(THUMBNAIL_SRC src/thumbnailprovider_posix.cpp)
+endif()
+
 qt_add_executable(diskscape
     src/main.cpp
     src/filesystemutils.h
     src/filesystemutils.cpp
     src/scanner.h
     ${SCANNER_BACKEND_SRC}
+    src/thumbnailprovider.h
+    ${THUMBNAIL_SRC}
     src/filenode.h
     src/iconutils.h
     src/svgutils.h
@@ -133,6 +143,16 @@ if (TARGET Qt6::DBus)
     target_compile_definitions(diskscape PRIVATE DISKSCAPE_HAS_QT_DBUS)
 endif()
 
+if (APPLE)
+    target_link_libraries(diskscape PRIVATE
+        "-framework QuickLookThumbnailing"
+        "-framework CoreGraphics")
+endif()
+
+if (WIN32)
+    target_link_libraries(diskscape PRIVATE shell32 ole32 kernel32)
+endif()
+
 qt_add_executable(scanner_bench EXCLUDE_FROM_ALL
     src/scanner_bench.cpp
     src/filesystemutils.h
@@ -150,6 +170,10 @@ target_include_directories(scanner_bench PRIVATE src)
 target_link_libraries(scanner_bench PRIVATE
     Qt6::Core
 )
+
+if (WIN32)
+    target_link_libraries(scanner_bench PRIVATE kernel32)
+endif()
 
 install(TARGETS diskscape
     BUNDLE DESTINATION .
@@ -197,6 +221,10 @@ function(diskscape_add_test target)
         target_compile_definitions(${target} PRIVATE DISKSCAPE_HAS_QT_DBUS)
     endif()
 
+    if (WIN32)
+        target_link_libraries(${target} PRIVATE shell32 ole32 kernel32)
+    endif()
+
     if (DISKSCAPE_COVERAGE)
         target_compile_options(${target} PRIVATE --coverage)
         target_link_options(${target} PRIVATE --coverage)
@@ -230,6 +258,8 @@ set(DISKSCAPE_WIDGET_SRC
     src/mainwindow_utils.cpp
     ${DISKSCAPE_SETTINGS_SRC}
     ${DISKSCAPE_COLORUTILS_SRC}
+    src/thumbnailprovider.h
+    ${THUMBNAIL_SRC}
     src/treemapwidget.h
     src/treemapwidget.cpp
     src/treemap_drawing.h
@@ -289,6 +319,14 @@ diskscape_add_test(test_breadcrumbpathbar
     tests/test_breadcrumbpathbar.cpp
     src/breadcrumbpathbar.h
     src/breadcrumbpathbar.cpp
+    src/iconutils.h
+    ${DISKSCAPE_WIDGET_SRC}
+)
+
+diskscape_add_test(test_searchfilterpanel
+    tests/test_searchfilterpanel.cpp
+    src/searchfilterpanel.h
+    src/searchfilterpanel.cpp
     src/iconutils.h
     ${DISKSCAPE_WIDGET_SRC}
 )

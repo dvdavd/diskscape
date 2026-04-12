@@ -64,6 +64,8 @@ struct FileNode {
     uint32_t id = UINT32_MAX; // assigned by rebuildSearchMetadata(); UINT32_MAX = unnumbered/virtual
     bool isDirectory = false;
     bool isVirtual = false;   // for "Free Space" synthetic node
+    uint8_t colorMark = 0;    // stores FolderMark enum value; 0 = None
+    uint8_t iconMark = 0;     // stores FolderMark enum value; 0 = None
     int64_t mtime = 0;        // seconds since Unix epoch; 0 = unknown
 
     // Returns the full absolute path. The root stores it directly; descendants

@@ -547,6 +547,8 @@ void MainWindow::updateToolbarIcons(const QColor& iconColor)
         m_resetZoomAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/zoom-reset.svg")));
     if (m_toggleTypeLegendAction)
         m_toggleTypeLegendAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/list-details.svg")));
+    if (m_toggleFilterPanelAction)
+        m_toggleFilterPanelAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/filter.svg")));
     if (m_settingsAction)
         m_settingsAction->setIcon(icon(QStringLiteral(":/assets/tabler-icons/settings.svg")));
     if (m_menuButton)

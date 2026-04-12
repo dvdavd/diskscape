@@ -353,7 +353,13 @@ public:
                 const QPalette::ColorGroup colorGroup = windowActive
                     ? QPalette::Active
                     : QPalette::Inactive;
-                const QColor trackColor = opt.palette.color(colorGroup, QPalette::AlternateBase);
+                const QColor base = opt.palette.color(colorGroup, QPalette::Base);
+                const QColor text = opt.palette.color(colorGroup, QPalette::Text);
+                constexpr float kTrackMix = 0.08f;
+                const QColor trackColor(
+                    qRound(base.red()   + (text.red()   - base.red())   * kTrackMix),
+                    qRound(base.green() + (text.green() - base.green()) * kTrackMix),
+                    qRound(base.blue()  + (text.blue()  - base.blue())  * kTrackMix));
                 QColor fillColor = opt.palette.color(colorGroup, QPalette::Highlight);
                 fillColor.setAlpha(selected ? 150 : 110);
                 const qreal trackRadius = 3.0;
@@ -693,6 +699,7 @@ void MainWindow::setupToolbar(QSettings& store)
         if (QToolButton* singleFilesystemButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_limitToSameFilesystemAction))) {
             singleFilesystemButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         }
+        m_toolbar->addSeparator();
     }
 #endif
 
@@ -737,18 +744,12 @@ void MainWindow::setupToolbar(QSettings& store)
 
     m_toolbar->addSeparator();
 
-    m_toggleFilterPanelAction = m_toolbar->addAction(
-        toolbarIcon({"system-search", "filter"},
-            QStringLiteral(":/assets/tabler-icons/filter.svg")),
-        tr("Filter"));
-    m_toggleFilterPanelAction->setCheckable(true);
-    m_toggleFilterPanelAction->setChecked(false);
-    m_toggleFilterPanelAction->setEnabled(false);
-    m_toggleFilterPanelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+F")));
-    setActionTooltip(m_toggleFilterPanelAction, tr("Show or hide the search filter panel"));
-    if (QToolButton* filterButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_toggleFilterPanelAction))) {
-        filterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    }
+    QIcon settingsIcon = toolbarIcon({"settings-configure", "preferences-system"},
+        QStringLiteral(":/assets/tabler-icons/settings.svg"));
+    m_settingsAction = m_toolbar->addAction(settingsIcon, QString());
+    m_settingsAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+,")), QKeySequence(QStringLiteral("Ctrl+Alt+,"))});
+    setActionTooltip(m_settingsAction, tr("Open application settings"));
+    connect(m_settingsAction, &QAction::triggered, this, &MainWindow::openSettings);
 
     m_clearMarksAction = new QAction(tr("Clear All Marked Folders"), this);
     m_clearMarksAction->setIcon(menuActionIcon({"bookmark-remove"},
@@ -840,22 +841,23 @@ void MainWindow::setupToolbar(QSettings& store)
     searchSpacer->setFocusPolicy(Qt::NoFocus);
     m_toolbar->addWidget(searchSpacer);
 
-    QIcon settingsIcon = toolbarIcon({"settings-configure", "preferences-system"},
-        QStringLiteral(":/assets/tabler-icons/settings.svg"));
-    m_settingsAction = m_toolbar->addAction(settingsIcon, tr("Settings"));
-    m_settingsAction->setShortcuts({QKeySequence(QStringLiteral("Ctrl+,")), QKeySequence(QStringLiteral("Ctrl+Alt+,"))});
-    setActionTooltip(m_settingsAction, tr("Open application settings"));
-    connect(m_settingsAction, &QAction::triggered, this, &MainWindow::openSettings);
-    if (QToolButton* settingsButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_settingsAction))) {
-        settingsButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_toggleFilterPanelAction = m_toolbar->addAction(
+        toolbarIcon({"system-search", "filter"},
+            QStringLiteral(":/assets/tabler-icons/filter.svg")),
+        tr("Filter"));
+    m_toggleFilterPanelAction->setCheckable(true);
+    m_toggleFilterPanelAction->setChecked(false);
+    m_toggleFilterPanelAction->setEnabled(false);
+    m_toggleFilterPanelAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+F")));
+    setActionTooltip(m_toggleFilterPanelAction, tr("Show or hide the search filter panel"));
+    if (QToolButton* filterButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_toggleFilterPanelAction))) {
+        filterButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     }
 
-    updatePathBarChrome();
+    QAction* menuSettingsAction = new QAction(settingsIcon, tr("Settings"), this);
+    connect(menuSettingsAction, &QAction::triggered, this, &MainWindow::openSettings);
 
-    auto* menuSpacer = new QWidget(this);
-    menuSpacer->setFixedWidth(10);
-    menuSpacer->setFocusPolicy(Qt::NoFocus);
-    m_toolbar->addWidget(menuSpacer);
+    updatePathBarChrome();
 
     auto* toolbarMenu = new QMenu(this);
     toolbarMenu->addAction(m_homeAction);
@@ -872,11 +874,16 @@ void MainWindow::setupToolbar(QSettings& store)
 #ifndef Q_OS_WIN
     if (m_limitToSameFilesystemAction) {
         toolbarMenu->addAction(m_limitToSameFilesystemAction);
+        toolbarMenu->addSeparator();
     }
 #endif
     toolbarMenu->addAction(m_toggleFreeSpaceAction);
     toolbarMenu->addAction(m_toggleDirectoryTreeAction);
     toolbarMenu->addAction(m_toggleTypeLegendAction);
+    toolbarMenu->addSeparator();
+    toolbarMenu->addAction(menuSettingsAction);
+    toolbarMenu->addSeparator();
+    toolbarMenu->addAction(m_toggleFilterPanelAction);
     m_warningsMenuAction = toolbarMenu->addAction(tr("Warnings"));
     m_warningsMenuAction->setCheckable(true);
     m_warningsMenuAction->setShortcut(m_permissionWarningAction->shortcut());
@@ -884,8 +891,6 @@ void MainWindow::setupToolbar(QSettings& store)
     m_warningsMenuAction->setIcon(m_permissionWarningIcon);
     toolbarMenu->addSeparator();
     toolbarMenu->addAction(m_clearMarksAction);
-    toolbarMenu->addSeparator();
-    toolbarMenu->addAction(m_settingsAction);
     toolbarMenu->addSeparator();
     toolbarMenu->addAction(m_aboutAppAction);
     toolbarMenu->addAction(m_aboutQtAction);
@@ -973,10 +978,15 @@ void MainWindow::setupToolbar(QSettings& store)
     macViewMenu->addSeparator();
     if (m_limitToSameFilesystemAction) {
         macViewMenu->addAction(m_limitToSameFilesystemAction);
+        macViewMenu->addSeparator();
     }
     macViewMenu->addAction(m_toggleFreeSpaceAction);
     macViewMenu->addAction(m_toggleDirectoryTreeAction);
     macViewMenu->addAction(m_toggleTypeLegendAction);
+    macViewMenu->addSeparator();
+    macViewMenu->addAction(m_settingsAction);
+    macViewMenu->addSeparator();
+    macViewMenu->addAction(m_toggleFilterPanelAction);
     macViewMenu->addSeparator();
     macViewMenu->addAction(m_clearMarksAction);
     macViewMenu->addSeparator();
@@ -1121,6 +1131,9 @@ void MainWindow::setupCentralWidget(QSettings& store)
     connect(m_toggleFilterPanelAction, &QAction::toggled, this, [this](bool checked) {
         if (m_filterPanel) {
             m_filterPanel->setVisible(checked);
+            if (checked) {
+                m_filterPanel->focusNameField();
+            }
             if (m_treemapWidget) {
                 m_treemapWidget->setFilterParams(checked ? m_filterPanel->currentParams() : FilterParams{});
             }
@@ -1880,7 +1893,7 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
     }
 
     const FileNode* currentNode = m_treemapWidget ? m_treemapWidget->currentNode() : nullptr;
-    if (!forceRescan && !m_scanInProgress && currentNode && currentNode->computePath() == normalizedDir) {
+    if (!forceRescan && !m_scanInProgress && currentNode && nodePath(const_cast<FileNode*>(currentNode)) == normalizedDir) {
         syncPathCombo(normalizedDir);
         return;
     }
@@ -2957,15 +2970,31 @@ void MainWindow::markFolder(FileNode* node, FolderMark mark)
     if (mark == FolderMark::None) {
         m_settings.folderColorMarks.remove(path);
         m_settings.folderIconMarks.remove(path);
+        node->colorMark = 0;
+        node->iconMark = 0;
     } else if (isFolderColorMark(mark)) {
-        m_settings.folderColorMarks.insert(path, mark);
+        if (m_settings.folderColorMarks.value(path) == mark) {
+            m_settings.folderColorMarks.remove(path);
+            node->colorMark = 0;
+        } else {
+            m_settings.folderColorMarks.insert(path, mark);
+            node->colorMark = static_cast<uint8_t>(mark);
+        }
     } else {
-        m_settings.folderIconMarks.insert(path, mark);
+        if (m_settings.folderIconMarks.value(path) == mark) {
+            m_settings.folderIconMarks.remove(path);
+            node->iconMark = 0;
+        } else {
+            m_settings.folderIconMarks.insert(path, mark);
+            node->iconMark = static_cast<uint8_t>(mark);
+        }
     }
     m_settings.sanitize();
     saveSettingsAsync([settings = m_settings](QSettings& store) { settings.save(store); });
-    if (m_treemapWidget) m_treemapWidget->applySettings(m_settings);
-    if (m_treemapWidget) m_treemapWidget->refreshSearchIndex();
+    if (m_treemapWidget) {
+        m_treemapWidget->applySettings(m_settings);
+        m_treemapWidget->refreshSearchIndex();
+    }
     m_clearMarksAction->setEnabled(
         !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
     if (isFolderColorMark(mark) || mark == FolderMark::None) {
@@ -2982,7 +3011,11 @@ void MainWindow::clearAllMarkedFolders()
     m_settings.folderColorMarks.clear();
     m_settings.folderIconMarks.clear();
     applyTreemapSettings(m_settings, true);
-    if (m_treemapWidget) m_treemapWidget->refreshSearchIndex();
+    if (m_treemapWidget) {
+        m_treemapWidget->clearAllNodeMarks();
+        m_treemapWidget->refreshSearchIndex();
+    }
+    recolorCurrentTree();
 }
 
 void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool persist)
@@ -3209,7 +3242,21 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
     QAction* copyPathAction = nullptr;
     QAction* deleteAction = nullptr;
     QAction* refreshAction = nullptr;
+    QAction* previewAction = nullptr;
     QAction* propertiesAction = nullptr;
+    if (!node->isDirectory && m_treemapWidget && m_treemapWidget->nodeSupportsImagePreview(node)) {
+        previewAction = menu.addAction(tr("Preview"));
+        previewAction->setIcon(menuActionIcon({"image-x-generic", "photo"},
+            QStringLiteral(":/assets/tabler-icons/photo.svg"),
+            QStringLiteral(":/assets/tabler-icons/photo.svg"),
+            QStyle::SP_FileIcon));
+        QFont previewFont = previewAction->font();
+        previewFont.setBold(true);
+        previewAction->setFont(previewFont);
+        menu.setDefaultAction(previewAction);
+        menu.addSeparator();
+    }
+
     if (node->isDirectory) {
         zoomAction = menu.addAction(tr("Zoom In"));
         zoomAction->setIcon(menuActionIcon({"zoom-in"},
@@ -3298,29 +3345,9 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
         }
 
         connect(markAsMenu, &QMenu::triggered, this,
-                [this, node, currentColorMark, currentIconMark](QAction* action) {
+                [this, node](QAction* action) {
             const FolderMark mark = static_cast<FolderMark>(action->data().toInt());
-            if (mark == FolderMark::None) return;
-            // Clicking the already-active mark toggles it off
-            if (isFolderColorMark(mark) && mark == currentColorMark) {
-                const QString path = node->computePath();
-                m_settings.folderColorMarks.remove(path);
-                m_settings.sanitize();
-                saveSettingsAsync([settings = m_settings](QSettings& store) { settings.save(store); });
-                if (m_treemapWidget) m_treemapWidget->applySettings(m_settings);
-                m_clearMarksAction->setEnabled(
-                    !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
-                recolorNodeSubtree(node);
-            } else if (isFolderIconMark(mark) && mark == currentIconMark) {
-                const QString path = node->computePath();
-                m_settings.folderIconMarks.remove(path);
-                m_settings.sanitize();
-                saveSettingsAsync([settings = m_settings](QSettings& store) { settings.save(store); });
-                if (m_treemapWidget) m_treemapWidget->applySettings(m_settings);
-                m_clearMarksAction->setEnabled(
-                    !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
-                if (m_treemapWidget) m_treemapWidget->viewport()->update();
-            } else {
+            if (mark != FolderMark::None) {
                 markFolder(node, mark);
             }
         });
@@ -3351,14 +3378,22 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
                 QStringLiteral(":/assets/tabler-icons/files.svg"),
                 QStringLiteral(":/assets/tabler-icons/files.svg"),
                 QStyle::SP_FileIcon));
+            struct GroupInfo { QString name; int index; const FileTypeGroup* group; };
+            QList<GroupInfo> sortedGroups;
             for (int i = 0; i < m_settings.fileTypeGroups.size(); ++i) {
-                const FileTypeGroup& group = m_settings.fileTypeGroups.at(i);
-                QAction* a = addToTypeMenu->addAction(group.name);
-                a->setIcon(SettingsDialog::fileTypeGroupSwatchIcon(group.color));
-                const bool alreadyIn = group.extensions.contains(fileExt, Qt::CaseInsensitive);
+                sortedGroups.append({ m_settings.fileTypeGroups.at(i).name, i, &m_settings.fileTypeGroups.at(i) });
+            }
+            std::sort(sortedGroups.begin(), sortedGroups.end(), [](const GroupInfo& a, const GroupInfo& b) {
+                return a.name.compare(b.name, Qt::CaseInsensitive) < 0;
+            });
+
+            for (const auto& info : sortedGroups) {
+                QAction* a = addToTypeMenu->addAction(info.name);
+                a->setIcon(SettingsDialog::fileTypeGroupSwatchIcon(info.group->color));
+                const bool alreadyIn = info.group->extensions.contains(fileExt, Qt::CaseInsensitive);
                 a->setCheckable(true);
                 a->setChecked(alreadyIn);
-                a->setData(i);
+                a->setData(info.index);
             }
             addToTypeMenu->addSeparator();
             QAction* newGroupAction = addToTypeMenu->addAction(tr("New group..."));
@@ -3414,6 +3449,13 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
 
     QAction* chosen = menu.exec(globalPos);
     if (!chosen) {
+        return;
+    }
+
+    if (previewAction && chosen == previewAction) {
+        if (m_treemapWidget) {
+            m_treemapWidget->requestImagePreview(node, QRectF());
+        }
         return;
     }
 
@@ -3698,8 +3740,8 @@ void MainWindow::placeFreeSpaceNodes(FileNode* currentNode)
         return;
 
     // Check whether currentNode is a sub-filesystem mount point.
-    const QString currentPath = QFileInfo(currentNode->computePath()).canonicalFilePath();
-    const QString scanRootPath = QFileInfo(m_scanResult.root->computePath()).canonicalFilePath();
+    const QString currentPath = QFileInfo(nodePath(currentNode)).canonicalFilePath();
+    const QString scanRootPath = QFileInfo(nodePath(m_scanResult.root)).canonicalFilePath();
     const FsInfo* matchingFs = nullptr;
     for (const FsInfo& fs : m_scanResult.filesystems) {
         if (fs.canonicalMountRoot == currentPath && currentPath != scanRootPath) {
@@ -3841,6 +3883,13 @@ void MainWindow::clearCurrentTreemap()
     updateNavigationActions();
 }
 
+QString MainWindow::nodePath(FileNode* node) const
+{
+    if (!node) return {};
+    if (m_treemapWidget) return m_treemapWidget->nodePath(node);
+    return node->computePath();
+}
+
 void MainWindow::onNodeHovered(FileNode* node)
 {
     if (!node) {
@@ -3856,7 +3905,7 @@ void MainWindow::onNodeHovered(FileNode* node)
     if (node->isVirtual) {
         statusBar()->showMessage(tr("Free Space: %1").arg(sizeStr));
     } else {
-        statusBar()->showMessage(tr("%1  (%2)").arg(statusBarDisplayPath(node->computePath()), sizeStr));
+        statusBar()->showMessage(tr("%1  (%2)").arg(statusBarDisplayPath(nodePath(node)), sizeStr));
     }
 }
 

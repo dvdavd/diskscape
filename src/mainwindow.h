@@ -77,6 +77,7 @@ private slots:
     void onPostProcessFinished();
 
 private:
+    QString nodePath(FileNode* node) const;
     void syncFilesystemWatchControllerState();
     void finalizeIncrementalRefresh(IncrementalRefreshResult refreshed);
     void onScanProgress(ScanResult scanResult);

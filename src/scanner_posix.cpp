@@ -53,15 +53,15 @@ void reportScanWarning(const Scanner::ErrorCallback& errorCallback,
 } // namespace
 
 qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& scanState,
-                         const TreemapSettings& settings,
-                         const std::vector<QString>& allExcludedPaths,
-                         const ProgressReadyCallback& progressReadyCallback,
-                         const ProgressCallback& progressCallback, NodeArena& arena,
-                         const ActivityCallback& activityCallback,
-                         const Scanner::ErrorCallback& errorCallback,
-                         float branchHue, unsigned long long rootDev, const std::atomic_bool* cancelFlag, int depth)
-                         {
-
+                           const TreemapSettings& settings,
+                           const std::vector<QString>& allExcludedPaths,
+                           const ProgressReadyCallback& progressReadyCallback,
+                           const ProgressCallback& progressCallback, NodeArena& arena,
+                           const ActivityCallback& activityCallback,
+                           const ErrorCallback& errorCallback,
+                           float branchHue, unsigned long long rootDev, const std::atomic_bool* cancelFlag, int depth,
+                           bool inMarkedBranch)
+{
     if (depth > kMaxDepth || isCancelled(cancelFlag)) {
         return 0;
     }
@@ -100,37 +100,22 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
         qint64 fileSize = 0;
         int64_t fileMtime = 0;
 
-        if (dtype == DT_UNKNOWN) {
-            struct stat st;
-            if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                reportScanWarning(errorCallback, childPathPrefix + QString::fromLocal8Bit(dname), errno);
-                continue;
-            }
-            if (S_ISLNK(st.st_mode))
-                continue;
-            isDir = S_ISDIR(st.st_mode);
-            if (isDir) {
-                if (settings.limitToSameFilesystem && st.st_dev != rootDev)
-                    continue;
-            } else {
-                fileSize = st.st_size;
-                fileMtime = static_cast<int64_t>(st.st_mtime);
-            }
-        } else if (isDir) {
-            if (settings.limitToSameFilesystem) {
-                struct stat st;
-                if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                    reportScanWarning(errorCallback, childPathPrefix + QString::fromLocal8Bit(dname), errno);
-                    continue;
-                }
-                if (st.st_dev != rootDev)
-                    continue;
-            }
-        } else if (!isDir) {
+        if (dtype == DT_UNKNOWN || isDir || !isDir) {
             struct stat st;
             if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) == 0) {
-                fileSize = st.st_size;
+                if (S_ISLNK(st.st_mode))
+                    continue;
+                isDir = S_ISDIR(st.st_mode);
+                if (isDir) {
+                    if (settings.limitToSameFilesystem && st.st_dev != rootDev)
+                        continue;
+                } else {
+                    fileSize = st.st_size;
+                }
                 fileMtime = static_cast<int64_t>(st.st_mtime);
+            } else {
+                reportScanWarning(errorCallback, childPathPrefix + QString::fromLocal8Bit(dname), errno);
+                continue;
             }
         }
 
@@ -147,12 +132,36 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
             FileNode* child = arena.alloc();
             child->name = childName;
             child->isDirectory = true;
+            child->mtime = fileMtime;
             child->parent = node;
-            child->color = ColorUtils::folderColor(depth + 1, branchHue, settings).rgba();
+
+            float childBranchHue = branchHue;
+            bool inMarkedBranch = false;
+            if (!settings.folderColorMarks.isEmpty()) {
+                auto it = settings.folderColorMarks.constFind(childPath);
+                if (it != settings.folderColorMarks.constEnd()) {
+                    child->colorMark = static_cast<uint8_t>(it.value());
+                    childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark));
+                    inMarkedBranch = true;
+                }
+            }
+            if (!settings.folderIconMarks.isEmpty()) {
+                auto it = settings.folderIconMarks.constFind(childPath);
+                if (it != settings.folderIconMarks.constEnd()) {
+                    child->iconMark = static_cast<uint8_t>(it.value());
+                }
+            }
+
+            if (inMarkedBranch) {
+                child->color = ColorUtils::folderColorForMark(depth + 1, childBranchHue, settings).rgba();
+            } else {
+                child->color = ColorUtils::folderColor(depth + 1, childBranchHue, settings).rgba();
+            }
+
             node->children.push_back(child);
             child->size = scanNode(child, childPath, scanState, settings, allExcludedPaths,
                                    progressReadyCallback, progressCallback, arena, activityCallback,
-                                   errorCallback, branchHue, rootDev, cancelFlag, depth + 1);
+                                   errorCallback, childBranchHue, rootDev, cancelFlag, depth + 1);
             totalSize += child->size;
             totalFileCount += child->subtreeFileCount;
             if (depth <= 1 && !isCancelled(cancelFlag))
@@ -205,8 +214,26 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
     root->absolutePath = normalizedPath;
     root->isDirectory = true;
     root->parent = nullptr;
-    root->color = ColorUtils::folderColor(
-        0, ColorUtils::initialFolderBranchHue(root, settings), settings).rgba();
+    const float initialHue = ColorUtils::initialFolderBranchHue(root, settings);
+    bool rootInMarkedBranch = false;
+    if (!settings.folderColorMarks.isEmpty()) {
+        auto it = settings.folderColorMarks.constFind(normalizedPath);
+        if (it != settings.folderColorMarks.constEnd()) {
+            root->colorMark = static_cast<uint8_t>(it.value());
+            root->color = ColorUtils::folderColorForMark(0, ColorUtils::markHue(static_cast<FolderMark>(root->colorMark)), settings).rgba();
+            rootInMarkedBranch = true;
+        }
+    }
+    if (!rootInMarkedBranch) {
+        root->color = ColorUtils::folderColor(0, initialHue, settings).rgba();
+    }
+    if (!settings.folderIconMarks.isEmpty()) {
+        auto it = settings.folderIconMarks.constFind(normalizedPath);
+        if (it != settings.folderIconMarks.constEnd()) {
+            root->iconMark = static_cast<uint8_t>(it.value());
+        }
+    }
+
     result.root = root;
     const bool trackWorkerPaths = settings.enableScanActivityTracking && static_cast<bool>(progressCallback);
     const bool trackByteActivity = settings.enableScanActivityTracking && static_cast<bool>(activityCallback);
@@ -246,6 +273,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         float branchHue = 0.0f;
         unsigned long long rootDev;
         int depth = 0;
+        bool inMarkedBranch = false;
     };
 
     struct PartitionTask {
@@ -254,6 +282,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         float branchHue = 0.0f;
         unsigned long long rootDev;
         int depth = 0;
+        bool inMarkedBranch = false;
     };
 
     struct stat startSt;
@@ -264,7 +293,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
     std::vector<DirTask> dirTasks;
     std::vector<PartitionTask> partitionQueue;
-    partitionQueue.push_back({root, normalizedPath, 0.0f, static_cast<unsigned long long>(initialRootDev), 0});
+    partitionQueue.push_back({root, normalizedPath, rootInMarkedBranch ? ColorUtils::markHue(static_cast<FolderMark>(root->colorMark)) : initialHue, static_cast<unsigned long long>(initialRootDev), 0, rootInMarkedBranch});
 
     for (size_t partitionIndex = 0; partitionIndex < partitionQueue.size(); ++partitionIndex) {
         if (isCancelled(cancelFlag)) {
@@ -304,39 +333,23 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
             bool isDir = (dtype == DT_DIR);
             qint64 fileSize = 0;
             int64_t fileMtime = 0;
-            if (dtype == DT_UNKNOWN) {
-                struct stat st;
-                if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                    reportScanWarning(errorCallback, childPathPrefix + QString::fromLocal8Bit(dname), errno);
-                    continue;
-                }
-                if (S_ISLNK(st.st_mode)) {
-                    continue;
-                }
-                isDir = S_ISDIR(st.st_mode);
-                if (isDir) {
-                    if (settings.limitToSameFilesystem && st.st_dev != partition.rootDev)
-                        continue;
-                } else {
-                    fileSize = st.st_size;
-                    fileMtime = static_cast<int64_t>(st.st_mtime);
-                }
-            } else if (isDir) {
-                if (settings.limitToSameFilesystem) {
-                    struct stat st;
-                    if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                        reportScanWarning(errorCallback,
-                                          childPathPrefix + QString::fromLocal8Bit(dname), errno);
-                        continue;
-                    }
-                    if (st.st_dev != partition.rootDev)
-                        continue;
-                }
-            } else if (!isDir) {
+            if (dtype == DT_UNKNOWN || isDir || !isDir) {
                 struct stat st;
                 if (fstatat(dfd, dname, &st, AT_SYMLINK_NOFOLLOW) == 0) {
-                    fileSize = st.st_size;
+                    if (S_ISLNK(st.st_mode)) {
+                        continue;
+                    }
+                    isDir = S_ISDIR(st.st_mode);
+                    if (isDir) {
+                        if (settings.limitToSameFilesystem && st.st_dev != partition.rootDev)
+                            continue;
+                    } else {
+                        fileSize = st.st_size;
+                    }
                     fileMtime = static_cast<int64_t>(st.st_mtime);
+                } else {
+                    reportScanWarning(errorCallback, childPathPrefix + QString::fromLocal8Bit(dname), errno);
+                    continue;
                 }
             }
 
@@ -348,23 +361,47 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                     continue;
                 }
 
-                const float branchHue = partition.depth == 0
-                    ? ColorUtils::topLevelFolderBranchHue(childName, settings)
-                    : partition.branchHue;
+                float childBranchHue = partition.branchHue;
+                bool childInMarkedBranch = partition.inMarkedBranch;
+                if (partition.depth == 0) {
+                    childBranchHue = ColorUtils::topLevelFolderBranchHue(childName, settings);
+                }
+
                 FileNode* child = result.arena->alloc();
                 child->name = childName;
                 child->isDirectory = true;
+                child->mtime = fileMtime;
                 child->parent = partition.parent;
-                child->color = ColorUtils::folderColor(
-                    partition.depth + 1, branchHue, settings).rgba();
+
+                if (!settings.folderColorMarks.isEmpty()) {
+                    auto it = settings.folderColorMarks.constFind(childPath);
+                    if (it != settings.folderColorMarks.constEnd()) {
+                        child->colorMark = static_cast<uint8_t>(it.value());
+                        childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark));
+                        childInMarkedBranch = true;
+                    }
+                }
+                if (!settings.folderIconMarks.isEmpty()) {
+                    auto it = settings.folderIconMarks.constFind(childPath);
+                    if (it != settings.folderIconMarks.constEnd()) {
+                        child->iconMark = static_cast<uint8_t>(it.value());
+                    }
+                }
+
+                if (childInMarkedBranch) {
+                    child->color = ColorUtils::folderColorForMark(partition.depth + 1, childBranchHue, settings).rgba();
+                } else {
+                    child->color = ColorUtils::folderColor(partition.depth + 1, childBranchHue, settings).rgba();
+                }
+
                 child->size = kProvisionalDirectoryPreviewSize;
                 partition.parent->children.push_back(child);
                 addSizeUpwards(partition.parent, child->size);
 
                 if (partition.depth + 1 < settings.parallelPartitionDepth) {
-                    partitionQueue.push_back({child, childPath, branchHue, partition.rootDev, partition.depth + 1});
+                    partitionQueue.push_back({child, childPath, childBranchHue, partition.rootDev, partition.depth + 1, childInMarkedBranch});
                 } else {
-                    dirTasks.push_back({child, childPath, branchHue, partition.rootDev, partition.depth + 1});
+                    dirTasks.push_back({child, childPath, childBranchHue, partition.rootDev, partition.depth + 1, childInMarkedBranch});
                 }
 
             } else {
@@ -373,11 +410,12 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 child->isDirectory = false;
                 child->parent = partition.parent;
                 child->size = fileSize;
+                child->subtreeFileCount = 1;
                 child->mtime = fileMtime;
                 child->extKey = ColorUtils::packFileExt(child->name);
                 child->color = ColorUtils::fileColorForName(child->name, settings).rgba();
                 partition.parent->children.push_back(child);
-                addSizeUpwards(partition.parent, fileSize);
+                addStatsUpwards(partition.parent, fileSize, 1);
                 if (trackByteActivity) {
                     liveBytesSeen->fetch_add(fileSize, std::memory_order_relaxed);
                     activityCallback(childPathPrefix + child->name,
@@ -486,7 +524,8 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                                   nullptr,
                                   *r.arena, workerActivityCallback,
                                   errorCallback,
-                                  task.branchHue, task.rootDev, cancelFlag, task.depth);
+                                  task.branchHue, task.rootDev, cancelFlag, task.depth,
+                                  task.inMarkedBranch);
                 if (isCancelled(cancelFlag)) {
                     r.workerRoot = nullptr;
                 }
@@ -520,13 +559,15 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                     continue;
                 }
                 const qint64 provisionalSize = r.placeholder->size;
+                const int provisionalFileCount = r.placeholder->subtreeFileCount;
                 r.placeholder->size = r.workerRoot->size;
                 r.placeholder->subtreeFileCount = r.workerRoot->subtreeFileCount;
                 r.placeholder->children = std::move(r.workerRoot->children);
                 for (FileNode* child : r.placeholder->children) {
                     child->parent = r.placeholder;
                 }
-                addSizeUpwards(r.placeholder->parent, r.placeholder->size - provisionalSize);
+                addStatsUpwards(r.placeholder->parent, r.placeholder->size - provisionalSize,
+                                r.placeholder->subtreeFileCount - provisionalFileCount);
                 QElapsedTimer mergeTimer;
                 mergeTimer.start();
                 result.arena->merge(std::move(*r.arena));

@@ -7,6 +7,7 @@
 #include <QString>
 #include <QStringList>
 #include <QHash>
+#include <QSet>
 
 enum class FolderMark : int {
     None = 0,
@@ -155,6 +156,7 @@ struct TreemapSettings {
     };
 
     bool showThumbnails = false;
+    bool showVideoThumbnails = false;
     int thumbnailResolution = 256;
     int thumbnailMinTileSize = 80;
     int thumbnailMemoryLimitMB = 256;
@@ -170,8 +172,12 @@ struct TreemapSettings {
     bool followSystemColorTheme = true;
     QHash<QString, FolderMark> folderColorMarks;
     QHash<QString, FolderMark> folderIconMarks;
+    QSet<QString> markedPathPrefixes; // All prefixes of marked paths for pruning traversals
 
     TreemapSettings();
+
+    void rebuildMarkPrefixes();
+    bool mightHaveMarkInSubtree(const QString& path) const;
 
     TreemapColorTheme* findColorTheme(const QString& themeId);
     const TreemapColorTheme* findColorTheme(const QString& themeId) const;

@@ -3,6 +3,7 @@
 #include "searchfilterpanel.h"
 #include "mainwindow_utils.h"
 
+#include <algorithm>
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QComboBox>
@@ -130,6 +131,7 @@ void SearchFilterPanel::buildUi()
     sizeLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     row1->addWidget(sizeLabel, 0, Qt::AlignVCenter);
     m_sizeMinSpin = new QDoubleSpinBox(this);
+    m_sizeMinSpin->setObjectName(QStringLiteral("m_sizeMinSpin"));
     m_sizeMinSpin->setRange(0, 9999999);
     m_sizeMinSpin->setDecimals(0);
     m_sizeMinSpin->setSpecialValueText(tr("any"));
@@ -138,11 +140,13 @@ void SearchFilterPanel::buildUi()
             this, &SearchFilterPanel::onAnyFilterChanged);
     row1->addWidget(m_sizeMinSpin, 0, Qt::AlignVCenter);
     m_sizeMinUnit = makeSizeUnitCombo(this);
+    m_sizeMinUnit->setObjectName(QStringLiteral("m_sizeMinUnit"));
     connect(m_sizeMinUnit, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SearchFilterPanel::onAnyFilterChanged);
     row1->addWidget(m_sizeMinUnit, 0, Qt::AlignVCenter);
     row1->addWidget(new QLabel(QStringLiteral("–"), this), 0, Qt::AlignVCenter);
     m_sizeMaxSpin = new QDoubleSpinBox(this);
+    m_sizeMaxSpin->setObjectName(QStringLiteral("m_sizeMaxSpin"));
     m_sizeMaxSpin->setRange(0, 9999999);
     m_sizeMaxSpin->setDecimals(0);
     m_sizeMaxSpin->setSpecialValueText(tr("any"));
@@ -151,6 +155,7 @@ void SearchFilterPanel::buildUi()
             this, &SearchFilterPanel::onAnyFilterChanged);
     row1->addWidget(m_sizeMaxSpin, 0, Qt::AlignVCenter);
     m_sizeMaxUnit = makeSizeUnitCombo(this);
+    m_sizeMaxUnit->setObjectName(QStringLiteral("m_sizeMaxUnit"));
     connect(m_sizeMaxUnit, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &SearchFilterPanel::onAnyFilterChanged);
     row1->addWidget(m_sizeMaxUnit, 0, Qt::AlignVCenter);
@@ -162,6 +167,7 @@ void SearchFilterPanel::buildUi()
     dateLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     row1->addWidget(dateLabel, 0, Qt::AlignVCenter);
     m_dateFromCheck = new QCheckBox(this);
+    m_dateFromCheck->setObjectName(QStringLiteral("m_dateFromCheck"));
     m_dateFromCheck->setToolTip(tr("Enable 'modified from' date bound"));
     connect(m_dateFromCheck, &QCheckBox::toggled, this, [this](bool on) {
         m_dateFromEdit->setEnabled(on);
@@ -169,6 +175,7 @@ void SearchFilterPanel::buildUi()
     });
     row1->addWidget(m_dateFromCheck, 0, Qt::AlignVCenter);
     m_dateFromEdit = new QDateEdit(QDate::currentDate(), this);
+    m_dateFromEdit->setObjectName(QStringLiteral("m_dateFromEdit"));
     m_dateFromEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
     m_dateFromEdit->setCalendarPopup(true);
     m_dateFromEdit->setEnabled(false);
@@ -177,6 +184,7 @@ void SearchFilterPanel::buildUi()
     row1->addWidget(m_dateFromEdit, 0, Qt::AlignVCenter);
     row1->addWidget(new QLabel(QStringLiteral("–"), this), 0, Qt::AlignVCenter);
     m_dateToCheck = new QCheckBox(this);
+    m_dateToCheck->setObjectName(QStringLiteral("m_dateToCheck"));
     m_dateToCheck->setToolTip(tr("Enable 'modified to' date bound"));
     connect(m_dateToCheck, &QCheckBox::toggled, this, [this](bool on) {
         m_dateToEdit->setEnabled(on);
@@ -184,6 +192,7 @@ void SearchFilterPanel::buildUi()
     });
     row1->addWidget(m_dateToCheck, 0, Qt::AlignVCenter);
     m_dateToEdit = new QDateEdit(QDate::currentDate(), this);
+    m_dateToEdit->setObjectName(QStringLiteral("m_dateToEdit"));
     m_dateToEdit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
     m_dateToEdit->setCalendarPopup(true);
     m_dateToEdit->setEnabled(false);
@@ -217,6 +226,7 @@ void SearchFilterPanel::buildUi()
     typeLabel->setAlignment(Qt::AlignVCenter | Qt::AlignRight);
     row2->addWidget(typeLabel, 0, Qt::AlignVCenter);
     m_typeCombo = new QComboBox(this);
+    m_typeCombo->setObjectName(QStringLiteral("m_typeCombo"));
     m_typeCombo->addItem(tr("All types"), QString());
     m_typeCombo->setMinimumWidth(110);
     m_typeCombo->setMaximumWidth(180);
@@ -302,6 +312,14 @@ void SearchFilterPanel::buildUi()
     refreshChromeStyles();
 }
 
+void SearchFilterPanel::focusNameField()
+{
+    if (m_nameEdit) {
+        m_nameEdit->setFocus(Qt::OtherFocusReason);
+        m_nameEdit->selectAll();
+    }
+}
+
 void SearchFilterPanel::setChromeBorderColor(const QColor& color)
 {
     if (m_chromeBorderColor == color) {
@@ -385,9 +403,18 @@ void SearchFilterPanel::setSettings(const TreemapSettings& settings)
     m_typeCombo->clear();
     m_typeCombo->addItem(tr("All types"), QString());
 
-    for (const FileTypeGroup& group : settings.fileTypeGroups) {
-        m_typeCombo->addItem(makeColorSwatchIcon(group.color), group.name, group.name);
+    QList<const FileTypeGroup*> sortedGroups;
+    for (const auto& group : settings.fileTypeGroups) {
+        sortedGroups.append(&group);
     }
+    std::sort(sortedGroups.begin(), sortedGroups.end(), [](const FileTypeGroup* a, const FileTypeGroup* b) {
+        return a->name.compare(b->name, Qt::CaseInsensitive) < 0;
+    });
+
+    for (const FileTypeGroup* group : sortedGroups) {
+        m_typeCombo->addItem(makeColorSwatchIcon(group->color), group->name, group->name);
+    }
+
     // Restore previous selection if it still exists.
     const int idx = m_typeCombo->findData(currentType);
     m_typeCombo->setCurrentIndex(idx >= 0 ? idx : 0);
@@ -401,8 +428,13 @@ FilterParams SearchFilterPanel::currentParams() const
 
     const qint64 sizeMin = computeSizeBytes(m_sizeMinSpin->value(), m_sizeMinUnit->currentIndex());
     const qint64 sizeMax = computeSizeBytes(m_sizeMaxSpin->value(), m_sizeMaxUnit->currentIndex());
-    p.sizeMin = sizeMin;
-    p.sizeMax = sizeMax;
+    if (sizeMin > 0 && sizeMax > 0 && sizeMin > sizeMax) {
+        p.sizeMin = sizeMax;
+        p.sizeMax = sizeMin;
+    } else {
+        p.sizeMin = sizeMin;
+        p.sizeMax = sizeMax;
+    }
 
     if (m_dateFromCheck->isChecked()) {
         const QDateTime dt(m_dateFromEdit->date(), QTime(0, 0, 0));
@@ -411,6 +443,9 @@ FilterParams SearchFilterPanel::currentParams() const
     if (m_dateToCheck->isChecked()) {
         const QDateTime dt(m_dateToEdit->date(), QTime(23, 59, 59));
         p.dateMax = dt.toSecsSinceEpoch();
+    }
+    if (p.dateMin > 0 && p.dateMax > 0 && p.dateMin > p.dateMax) {
+        std::swap(p.dateMin, p.dateMax);
     }
 
     const QString typeGroup = m_typeCombo->currentData().toString();

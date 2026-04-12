@@ -30,6 +30,8 @@ public:
     // Resets all controls to their defaults and emits filterParamsChanged with empty params.
     void clearAll();
 
+    void focusNameField();
+
     void setChromeBorderColor(const QColor& color);
 
 signals:

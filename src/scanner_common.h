@@ -147,7 +147,7 @@ bool pathIsWithinNode(const FileNode* node, const QString& currentPath)
         return false;
     }
 
-    const QString nodePath = node->computePath();
+    const QString nodePath = !node->absolutePath.isEmpty() ? node->absolutePath : node->computePath();
     if (nodePath.isEmpty()) {
         return false;
     }
@@ -184,12 +184,18 @@ bool pathIsWithinCandidate(const QString& currentPath, const QString& candidateP
     return currentPath.at(candidatePath.size()) == QLatin1Char('/');
 }
 
-void addSizeUpwards(FileNode* node, qint64 delta)
+void addStatsUpwards(FileNode* node, qint64 sizeDelta, int countDelta)
 {
     while (node) {
-        node->size += delta;
+        node->size += sizeDelta;
+        node->subtreeFileCount += countDelta;
         node = node->parent;
     }
+}
+
+void addSizeUpwards(FileNode* node, qint64 delta)
+{
+    addStatsUpwards(node, delta, 0);
 }
 
 FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,

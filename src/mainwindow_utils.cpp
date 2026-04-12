@@ -374,6 +374,24 @@ QList<BreadcrumbPathSegment> breadcrumbPathSegments(const QString& path)
     QList<BreadcrumbPathSegment> segments;
 
 #ifdef Q_OS_WIN
+    // Handle UNC paths (\\server\share\...)
+    if (normalized.startsWith(QLatin1String("//"))) {
+        const QStringList parts = normalized.mid(2).split(QLatin1Char('/'), Qt::KeepEmptyParts);
+        if (parts.size() >= 2) {
+            // Segment 1: \\server\share
+            QString currentPath = QLatin1String("//") + parts.at(0) + QLatin1Char('/') + parts.at(1);
+            segments.push_back({QDir::toNativeSeparators(currentPath), currentPath});
+            
+            // Following segments
+            for (int i = 2; i < parts.size(); ++i) {
+                currentPath += QLatin1Char('/') + parts.at(i);
+                segments.push_back({parts.at(i), currentPath});
+            }
+            return segments;
+        }
+    }
+
+    // Handle drive-letter paths (C:/...)
     if (normalized.size() >= 3
             && normalized.at(1) == QLatin1Char(':')
             && normalized.at(2) == QLatin1Char('/')) {

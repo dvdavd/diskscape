@@ -281,6 +281,7 @@ private slots:
         original.liveScanPreview    = false;
         original.excludedPaths      = {"/tmp/no-scan"};
         original.activeColorThemeId = TreemapColorTheme::builtInDarkId();
+        original.sanitize();
         {
             QSettings store(tmpFile.fileName(), QSettings::IniFormat);
             original.save(store);

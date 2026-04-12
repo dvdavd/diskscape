@@ -64,5 +64,6 @@ private:
                            const ProgressCallback& progressCallback, NodeArena& arena,
                            const ActivityCallback& activityCallback,
                            const ErrorCallback& errorCallback,
-                           float branchHue, unsigned long long rootDev, const std::atomic_bool* cancelFlag = nullptr, int depth = 0);
+                           float branchHue, unsigned long long rootDev, const std::atomic_bool* cancelFlag = nullptr, int depth = 0,
+                           bool inMarkedBranch = false);
 };

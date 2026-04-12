@@ -532,7 +532,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_fastWheelZoom = new QCheckBox(tr("Use fast wheel zoom animation (stretch/blend)"), this);
     m_trackpadScrollPans = new QCheckBox(tr("Scroll pans, Ctrl+scroll zooms (trackpad mode)"), this);
     m_simpleTooltips = new QCheckBox(tr("Use smaller, simpler tooltips in the treemap"));
-    m_showThumbnails = new QCheckBox(tr("Show image previews for image files"));
+    m_showThumbnails = new QCheckBox(tr("Show previews for image files"));
+    m_showVideoThumbnails = new QCheckBox(tr("Show previews for video files"));
     m_thumbnailFitMode = new QComboBox(this);
     m_thumbnailFitMode->addItem(tr("Fill (crop to tile, keep aspect ratio)"), TreemapSettings::ThumbnailFill);
     m_thumbnailFitMode->addItem(tr("Fit (letterbox, keep aspect ratio)"), TreemapSettings::ThumbnailFit);
@@ -1043,6 +1044,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     connect(m_revealFadeWidth, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &SettingsDialog::refreshPreview);
     connect(m_simpleTooltips, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
     connect(m_showThumbnails, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
+    connect(m_showVideoThumbnails, &QCheckBox::toggled, this, &SettingsDialog::refreshPreview);
     connect(m_thumbnailFitMode, &QComboBox::currentIndexChanged, this, &SettingsDialog::refreshPreview);
     connect(m_cameraMaxScale, &QSlider::valueChanged, this, [this](int value) {
         m_cameraMaxScaleValue->setText(QString::number(value));
@@ -1167,6 +1169,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
 
     auto* thumbnailsForm = new QFormLayout();
     thumbnailsForm->addRow(m_showThumbnails);
+    thumbnailsForm->addRow(m_showVideoThumbnails);
     thumbnailsForm->addRow(tr("Fit mode"), m_thumbnailFitMode);
     thumbnailsForm->addRow(tr("Preview resolution"),
                            createFieldWithDescription(m_thumbnailResolution,
@@ -1175,7 +1178,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
                            createFieldWithDescription(m_thumbnailMinTileSize,
                                tr("Thumbnails are only shown when a tile is at least this many pixels wide or tall.")));
     previewsLayout->addWidget(createSectionGroup(
-        tr("Image previews"),
+        tr("Previews"),
         QString(),
         thumbnailsForm));
 
@@ -1577,6 +1580,7 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_trackpadScrollPans->setChecked(settings.trackpadScrollPans);
     m_simpleTooltips->setChecked(settings.simpleTooltips);
     m_showThumbnails->setChecked(settings.showThumbnails);
+    m_showVideoThumbnails->setChecked(settings.showVideoThumbnails);
     m_thumbnailFitMode->setCurrentIndex(m_thumbnailFitMode->findData(settings.thumbnailFitMode));
     m_thumbnailResolution->setValue(settings.thumbnailResolution);
     m_thumbnailMinTileSize->setValue(settings.thumbnailMinTileSize);
@@ -1674,6 +1678,7 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.trackpadScrollPans = m_trackpadScrollPans->isChecked();
     currentSettings.simpleTooltips = m_simpleTooltips->isChecked();
     currentSettings.showThumbnails = m_showThumbnails->isChecked();
+    currentSettings.showVideoThumbnails = m_showVideoThumbnails->isChecked();
     currentSettings.thumbnailFitMode = m_thumbnailFitMode->currentData().toInt();
     currentSettings.thumbnailResolution = m_thumbnailResolution->value();
     currentSettings.thumbnailMinTileSize = m_thumbnailMinTileSize->value();

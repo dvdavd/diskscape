@@ -144,6 +144,7 @@ private:
     QCheckBox* m_trackpadScrollPans = nullptr;
     QCheckBox* m_simpleTooltips = nullptr;
     QCheckBox* m_showThumbnails = nullptr;
+    QCheckBox* m_showVideoThumbnails = nullptr;
     QComboBox* m_thumbnailFitMode = nullptr;
     QSpinBox* m_thumbnailResolution = nullptr;
     QSpinBox* m_thumbnailMinTileSize = nullptr;

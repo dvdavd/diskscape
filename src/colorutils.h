@@ -25,6 +25,8 @@ float normalizedHue(float hue);
 float hueFromColor(const QColor& color, float fallbackHue);
 float topLevelFolderBranchHue(const QString& name, const TreemapSettings& settings);
 float initialFolderBranchHue(const FileNode* root, const TreemapSettings& settings);
+float markHue(FolderMark mark);
+QColor folderColorForMark(int depth, float branchHue, const TreemapSettings& settings);
 QColor folderColorForBranch(int depth, float branchHue, const TreemapSettings& settings);
 QColor folderColor(int depth, float branchHue, const TreemapSettings& settings);
 QColor fileColorForName(const QString& name, const TreemapSettings& settings);

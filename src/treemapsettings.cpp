@@ -258,8 +258,8 @@ void TreemapSettings::applyDefaults(TreemapSettings& settings)
           { QStringLiteral("mp4"), QStringLiteral("mkv"), QStringLiteral("mov"),
             QStringLiteral("avi"), QStringLiteral("webm"), QStringLiteral("flv"),
             QStringLiteral("wmv"), QStringLiteral("m4v"), QStringLiteral("mpg"),
-            QStringLiteral("mpeg"), QStringLiteral("ts"), QStringLiteral("mts"),
-            QStringLiteral("m2ts"), QStringLiteral("vob"), QStringLiteral("ogv"),
+            QStringLiteral("mpeg"), QStringLiteral("m2ts"), QStringLiteral("vob"),
+            QStringLiteral("ogv"),
             QStringLiteral("3gp"), QStringLiteral("rmvb") } },
         { QStringLiteral("Documents"),
           QColor::fromHslF(0.90f, 1.0f, 0.50f),
@@ -445,6 +445,38 @@ void TreemapSettings::ensureColorThemes()
     if (!findColorTheme(darkModeColorThemeId)) {
         darkModeColorThemeId = TreemapColorTheme::builtInDarkId();
     }
+    rebuildMarkPrefixes();
+}
+
+void TreemapSettings::rebuildMarkPrefixes()
+{
+    markedPathPrefixes.clear();
+    auto addPath = [this](const QString& path) {
+        if (path.isEmpty()) return;
+        markedPathPrefixes.insert(path);
+        QString cur = path;
+        int idx = cur.lastIndexOf(QLatin1Char('/'));
+        while (idx > 0) {
+            cur = cur.left(idx);
+            if (cur.isEmpty() || markedPathPrefixes.contains(cur)) break;
+            markedPathPrefixes.insert(cur);
+            idx = cur.lastIndexOf(QLatin1Char('/'));
+        }
+        // Always include the empty/root path if there is any mark
+        markedPathPrefixes.insert(QString());
+    };
+    for (auto it = folderColorMarks.constBegin(); it != folderColorMarks.constEnd(); ++it) {
+        addPath(it.key());
+    }
+    for (auto it = folderIconMarks.constBegin(); it != folderIconMarks.constEnd(); ++it) {
+        addPath(it.key());
+    }
+}
+
+bool TreemapSettings::mightHaveMarkInSubtree(const QString& path) const
+{
+    if (folderColorMarks.isEmpty() && folderIconMarks.isEmpty()) return false;
+    return markedPathPrefixes.contains(path);
 }
 
 void TreemapSettings::sanitize()
@@ -534,6 +566,7 @@ void TreemapSettings::sanitize()
         }
         g.extensions.removeAll(QString{});
     }
+    rebuildMarkPrefixes();
 }
 
 TreemapSettings TreemapSettings::defaults()
@@ -615,6 +648,7 @@ TreemapSettings TreemapSettings::load(QSettings& store)
     settings.simpleTooltips = store.value("treemap/simpleTooltips", settings.simpleTooltips).toBool();
     settings.hideNonLocalFreeSpace = store.value("treemap/hideNonLocalFreeSpace", settings.hideNonLocalFreeSpace).toBool();
     settings.showThumbnails = store.value("treemap/showThumbnails", settings.showThumbnails).toBool();
+    settings.showVideoThumbnails = store.value("treemap/showVideoThumbnails", settings.showVideoThumbnails).toBool();
     settings.thumbnailResolution = store.value("treemap/thumbnailResolution", settings.thumbnailResolution).toInt();
     settings.thumbnailMinTileSize = store.value("treemap/thumbnailMinTileSize", settings.thumbnailMinTileSize).toInt();
     settings.thumbnailMemoryLimitMB = store.value("treemap/thumbnailMemoryLimitMB", settings.thumbnailMemoryLimitMB).toInt();
@@ -823,6 +857,7 @@ void TreemapSettings::save(QSettings& store) const
     store.setValue("treemap/simpleTooltips", snapshot.simpleTooltips);
     store.setValue("treemap/hideNonLocalFreeSpace", snapshot.hideNonLocalFreeSpace);
     store.setValue("treemap/showThumbnails", snapshot.showThumbnails);
+    store.setValue("treemap/showVideoThumbnails", snapshot.showVideoThumbnails);
     store.setValue("treemap/thumbnailResolution", snapshot.thumbnailResolution);
     store.setValue("treemap/thumbnailMinTileSize", snapshot.thumbnailMinTileSize);
     store.setValue("treemap/thumbnailMemoryLimitMB", snapshot.thumbnailMemoryLimitMB);

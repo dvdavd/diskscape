@@ -46,12 +46,13 @@ class QScrollBar;
 // Held via shared_ptr so background tasks keep it alive after a tree change.
 struct SearchIndex {
     std::vector<FileNode*> nodes;      // all searchable nodes (files + dirs)
+    std::vector<QString> pathCache;    // indexed by node->id; full absolute path
     std::vector<uint32_t> nameOffsets; // indexed by node->id → byte offset in flatNames
     std::vector<uint16_t> nameLens;    // indexed by node->id → byte length in flatNames
     QHash<uint64_t, std::vector<FileNode*>> filesByExt; // packed extension key → matching files
     std::string flatNames;             // flat UTF-8 buffer of all case-folded names
-    std::vector<uint8_t> markCache;    // indexed by node->id; 0xFF = no mark, else FolderMark int
-    std::vector<bool> directMarkCache; // indexed by node->id; true if the node itself has a mark
+    std::vector<uint32_t> markCache;   // indexed by node->id; bitmask of FolderMark values (1 << mark)
+    std::vector<uint32_t> directMarkCache; // indexed by node->id; bitmask of FolderMark values (1 << mark) if node has it directly
     uint32_t nodeCount = 0;
     std::shared_ptr<NodeArena> arenaOwner;
 };
@@ -98,6 +99,7 @@ public:
 
     void setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena = {},
                  bool prepareModel = true, bool animateLayout = true);
+    QString nodePath(const FileNode* node) const;
     void notifyTreeChanged();
     void setCurrentNode(FileNode* node, const QPointF& anchorPos = QPointF(), bool useAnchor = false);
     void restoreViewState(const ViewState& state,
@@ -111,6 +113,7 @@ public:
     void setSizeFilter(qint64 minBytes, qint64 maxBytes);
     void setHighlightedFileType(const QString& typeLabel);
     void refreshSearchIndex();
+    void clearAllNodeMarks();
     // Returns a snapshot of which node IDs are "search-reachable": directly matched
     // by the current search/size filter, or inside a search-matched directory.
     // Empty vector when no search is active. Safe to capture and read off the main thread.
@@ -132,6 +135,8 @@ public:
     bool hasOpenImagePreview() const { return m_imagePreviewNode != nullptr || m_imagePreviewProgress > 0.0; }
     void closeImagePreviewFromNavigation();
     void applyLoadedImagePreview(const QString& path, const QImage& image);
+    bool nodeSupportsImagePreview(const FileNode* node) const;
+    void requestImagePreview(FileNode* node, const QRectF& sourceRect);
 
 signals:
     void nodeActivated(FileNode* node);
@@ -234,7 +239,7 @@ private:
                              FileNode* target, QRectF* outRect, int depth = -1) const;
     void relayout();
     void rebuildSearchMatches();
-    void rebuildSearchMetadata();
+    void clearIncrementalSearchState();
     void cancelPendingSearch();
     void cancelPendingMetadata();
     void onSearchTaskFinished();
@@ -255,11 +260,8 @@ private:
                    bool applyOwnReveal = true,
                    SceneRenderLayer layer = SceneRenderLayer::All);
     void paintMatchOverlayNode(QPainter& painter, FileNode* node, int depth,
-                               const QRectF& visibleClip, const QRectF& viewRect) const;
-    void paintMatchBordersNode(QPainter& painter, FileNode* node, int depth,
                                const QRectF& visibleClip, const QRectF& viewRect,
-                               const std::function<quint8(const FileNode*)>& matchLookup,
-                               quint8 selfMatchFlag) const;
+                               bool drawBorders) const;
     FileNode* hitTestChildren(FileNode* node, const QPointF& pos, int depth,
                               const QRectF& tileViewRect, const QRectF& contentArea,
                               const QRectF& visibleClip,
@@ -301,12 +303,10 @@ private:
     void updateTouchGesture(const QList<QEventPoint>& points);
     void endTouchGesture();
     void activateTouchTap(const QPointF& pos);
-    bool nodeSupportsImagePreview(const FileNode* node) const;
     QRectF imagePreviewSourceRectForNode(const FileNode* node) const;
     QSize imagePreviewBaseImageSize() const;
     qreal imagePreviewBaseOpacity() const;
     QRectF imagePreviewTargetRect() const;
-    void requestImagePreview(FileNode* node, const QRectF& sourceRect);
     void closeImagePreview(bool animated = true);
     void clearImagePreview();
     void paintImagePreviewOverlay(QPainter& painter);
@@ -468,10 +468,10 @@ private:
     mutable QHash<quint64, QString> m_elidedTextCache;
     mutable QHash<quint64, int> m_elidedDisplayWidthCache;
     mutable QHash<quint64, QSizeF> m_stableMetricCache;
-    mutable QHash<const FileNode*, bool> m_headerLabelVisibleCache;
-    mutable QHash<const FileNode*, bool> m_fileLabelVisibleCache;
+    mutable std::vector<uint8_t> m_headerLabelVisibleCache;
+    mutable std::vector<uint8_t> m_fileLabelVisibleCache;
+    mutable std::vector<uint8_t> m_fileSizeLabelVisibleCache;
     mutable QHash<const FileNode*, QSizeF> m_thumbnailStableSizeCache;
-    mutable QHash<const FileNode*, bool> m_fileSizeLabelVisibleCache;
     std::vector<uint8_t> m_searchMatchCache;   // indexed by FileNode::id, written on main thread
     uint32_t m_nodeCount = 0;
     std::shared_ptr<SearchIndex> m_searchIndex;         // current (immutable once published)
@@ -502,6 +502,7 @@ public:
     qsizetype m_thumbnailTotalBytes = 0;
     quint64 m_thumbnailAccessSeq = 0;
     QSet<QString> m_pendingThumbnails;
+    QSet<QString> m_thumbnailFailedPaths;
     QHash<QString, qint64> m_thumbnailReadyTimes;
 
 private:
