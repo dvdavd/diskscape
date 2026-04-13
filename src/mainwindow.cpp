@@ -20,7 +20,7 @@
 #include <QComboBox>
 #include <QCompleter>
 #include <QDesktopServices>
-#ifdef DISKSCAPE_HAS_QT_DBUS
+#ifdef DISKVU_HAS_QT_DBUS
 #include <QDBusConnection>
 #include <QDBusMessage>
 #endif
@@ -537,7 +537,7 @@ MainWindow::MainWindow(QWidget* parent)
     loadRecentPaths(store);
     loadFavouritePaths(store);
 
-    setWindowTitle(QStringLiteral("Diskscape"));
+    setWindowTitle(QStringLiteral("Diskvu"));
     resize(1200, 800);
 
     setupToolbar(store);
@@ -760,17 +760,17 @@ void MainWindow::setupToolbar(QSettings& store)
     m_clearMarksAction->setEnabled(
         !m_settings.folderColorMarks.isEmpty() || !m_settings.folderIconMarks.isEmpty());
 
-    m_aboutAppAction = new QAction(tr("About Diskscape"), this);
+    m_aboutAppAction = new QAction(tr("About Diskvu"), this);
     connect(m_aboutAppAction, &QAction::triggered, this, [this]() {
         QMessageBox::about(
             this,
-            QStringLiteral("About Diskscape"),
-            tr("Diskscape %1\n\n"
+            QStringLiteral("About Diskvu"),
+            tr("Diskvu %1\n\n"
                "Visualises disk usage as an interactive treemap.\n\n"
                "Copyright \u00a9 2026 dvdavd\n\n"
                "Bundled icons derived from Tabler Icons are Copyright \u00a9 2020-2026 "
                "Pawe\u0142 Kuna and licensed under the MIT License.\n\n"
-               "Diskscape is licensed under the MIT License.")
+               "Diskvu is licensed under the MIT License.")
                 .arg(QCoreApplication::applicationVersion()));
     });
 
@@ -3583,7 +3583,7 @@ bool MainWindow::deletePath(const QFileInfo& info, bool permanentDelete)
 
 void MainWindow::notifyTrashChanged() const
 {
-#ifdef DISKSCAPE_HAS_QT_DBUS
+#ifdef DISKVU_HAS_QT_DBUS
     // Dolphin and other KDE file views listen for KDirNotify updates on trash:/.
     QDBusMessage message = QDBusMessage::createSignal(
         QStringLiteral("/KDirNotify"),
@@ -3673,7 +3673,7 @@ void MainWindow::updateNavigationActions()
 
 void MainWindow::updateWindowTitle()
 {
-    const QString appTitle = QStringLiteral("Diskscape");
+    const QString appTitle = QStringLiteral("Diskvu");
     if (!m_treemapWidget) {
         setWindowTitle(appTitle);
         return;

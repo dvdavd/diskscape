@@ -38,7 +38,7 @@
 
 namespace {
 
-constexpr auto kLandingFavouriteMimeType = "application/x-diskscape-favourite-path";
+constexpr auto kLandingFavouriteMimeType = "application/x-diskvu-favourite-path";
 
 Qt::Alignment landingTextAlignment(const QWidget* widget, Qt::Alignment vertical)
 {
@@ -597,13 +597,13 @@ QWidget* MainWindow::createLandingPage()
         leftLayout->addStretch(1);
 
         auto* logo = new QLabel(idlePage);
-        logo->setPixmap(QIcon(QStringLiteral(":/assets/diskscape.svg")).pixmap(220, 220));
+        logo->setPixmap(QIcon(QStringLiteral(":/assets/diskvu.svg")).pixmap(220, 220));
         logo->setFixedSize(220, 220);
         logo->setAlignment(landingTextAlignment(logo, Qt::AlignVCenter));
         leftLayout->addWidget(logo);
         leftLayout->addSpacing(22);
 
-        auto* appTitle = new QLabel(QStringLiteral("Diskscape"), idlePage);
+        auto* appTitle = new QLabel(QStringLiteral("Diskvu"), idlePage);
         appTitle->setObjectName(QStringLiteral("landingAppTitle"));
         appTitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
         {

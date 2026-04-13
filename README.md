@@ -1,8 +1,8 @@
-# Diskscape
+# Diskvu
 
-Diskscape is a Qt-based Linux desktop application for exploring disk usage as an interactive treemap.
+Diskvu is a Qt-based Linux desktop application for exploring disk usage as an interactive treemap.
 
-![Diskscape main window](screenshots/main-window.png)
+![Diskvu main window](screenshots/main-window.png)
 
 ## Features
 
@@ -56,7 +56,7 @@ Configure and build with CMake:
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target diskscape -j$(nproc)
+cmake --build build --target diskvu -j$(nproc)
 ```
 
 On **macOS**, point CMake at your Qt6 installation first:
@@ -64,14 +64,14 @@ On **macOS**, point CMake at your Qt6 installation first:
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=$(brew --prefix qt6)
-cmake --build build --target diskscape -j$(sysctl -n hw.ncpu)
+cmake --build build --target diskvu -j$(sysctl -n hw.ncpu)
 ```
 
-The main app target is produced as `diskscape`:
+The main app target is produced as `diskvu`:
 
 ```bash
-./build/diskscape
-./build/Diskscape   # (macOS)
+./build/diskvu
+./build/Diskvu   # (macOS)
 ```
 
 macOS and Windows builds are currently unsupported but fully functional.

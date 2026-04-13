@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
         app.installTranslator(&qtTranslator);
 
     QTranslator appTranslator;
-    if (appTranslator.load(QLocale(), QStringLiteral("diskscape"), QStringLiteral("_"),
+    if (appTranslator.load(QLocale(), QStringLiteral("diskvu"), QStringLiteral("_"),
                            QStringLiteral(":/i18n")))
         app.installTranslator(&appTranslator);
 
@@ -32,16 +32,16 @@ int main(int argc, char* argv[])
         app.setStyle(QStyleFactory::create(QStringLiteral("fusion")));
     }
 #endif
-    QGuiApplication::setApplicationDisplayName(QStringLiteral("Diskscape"));
-    QGuiApplication::setDesktopFileName(QStringLiteral("io.github.dvdavd.Diskscape"));
-    app.setApplicationVersion(QString::fromLatin1(DISKSCAPE_VERSION));
-    app.setOrganizationName(QStringLiteral("diskscape"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("io.github.dvdavd.Diskscape"),
-                                       QIcon(QStringLiteral(":/assets/diskscape_appicon.svg"))));
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("Diskvu"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("io.github.dvdavd.Diskvu"));
+    app.setApplicationVersion(QString::fromLatin1(DISKVU_VERSION));
+    app.setOrganizationName(QStringLiteral("diskvu"));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("io.github.dvdavd.Diskvu"),
+                                       QIcon(QStringLiteral(":/assets/diskvu_appicon.svg"))));
     app.setFont(QFontDatabase::systemFont(QFontDatabase::GeneralFont), "QMenu");
     syncApplicationPaletteToColorScheme(app, systemUsesDarkColorScheme());
     QCommandLineParser parser;
-    parser.setApplicationDescription("Diskscape");
+    parser.setApplicationDescription("Diskvu");
     parser.addHelpOption();
     parser.addVersionOption();
 

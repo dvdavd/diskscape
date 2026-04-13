@@ -3,7 +3,7 @@
 #pragma once
 
 #include <QObject>
-#ifdef DISKSCAPE_HAS_QT_DBUS
+#ifdef DISKVU_HAS_QT_DBUS
 #include <QDBusVariant>
 #endif
 
@@ -25,7 +25,7 @@ signals:
 private:
     bool m_available = false;
 
-#ifdef DISKSCAPE_HAS_QT_DBUS
+#ifdef DISKVU_HAS_QT_DBUS
 private slots:
     void onSettingChanged(const QString& ns, const QString& key,
                           const QDBusVariant& value);

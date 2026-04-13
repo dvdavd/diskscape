@@ -342,8 +342,8 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="763"/>
-        <source>About Diskscape</source>
-        <translation>About Diskscape</translation>
+        <source>About Diskvu</source>
+        <translation>About Diskvu</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="777"/>
@@ -607,7 +607,7 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="768"/>
-        <source>Diskscape %1
+        <source>Diskvu %1
 
 Visualises disk usage as an interactive treemap.
 
@@ -615,8 +615,8 @@ Copyright © 2026 dvdavd
 
 Bundled icons derived from Tabler Icons are Copyright © 2020-2026 Paweł Kuna and licensed under the MIT License.
 
-Diskscape is licensed under the MIT License.</source>
-        <translation>Diskscape %1
+Diskvu is licensed under the MIT License.</source>
+        <translation>Diskvu %1
 
 Visualizes disk usage as an interactive treemap.
 
@@ -624,7 +624,7 @@ Copyright © 2026 dvdavd
 
 Bundled icons derived from Tabler Icons are Copyright © 2020-2026 Paweł Kuna and licensed under the MIT License.
 
-Diskscape is licensed under the MIT License.</translation>
+Diskvu is licensed under the MIT License.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="847"/>

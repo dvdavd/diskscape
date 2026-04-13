@@ -79,7 +79,7 @@ QImage getSystemThumbnail(const QString& path, int size)
 
     const QByteArray uri = ("file://" + path).toUtf8();
     const QString hash = QCryptographicHash::hash(uri, QCryptographicHash::Md5).toHex();
-    const QString tmpPath = QDir::tempPath() + "/diskscape_vthumb_" + hash + ".png";
+    const QString tmpPath = QDir::tempPath() + "/diskvu_vthumb_" + hash + ".png";
 
     QProcess proc;
     proc.setProcessChannelMode(QProcess::MergedChannels);

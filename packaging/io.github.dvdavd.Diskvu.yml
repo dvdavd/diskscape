@@ -1,8 +1,8 @@
-app-id: io.github.dvdavd.Diskscape
+app-id: io.github.dvdavd.Diskvu
 runtime: org.kde.Platform
 runtime-version: "6.9"
 sdk: org.kde.Sdk
-command: diskscape
+command: diskvu
 
 finish-args:
   - --socket=fallback-x11
@@ -12,13 +12,13 @@ finish-args:
   - --talk-name=org.freedesktop.FileManager1
 
 modules:
-  - name: diskscape
+  - name: diskvu
     buildsystem: cmake-ninja
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
       - -DCMAKE_SKIP_INSTALL_ALL_DEPENDENCY=TRUE
     make-args:
-      - diskscape
+      - diskvu
     sources:
       - type: dir
         path: ..

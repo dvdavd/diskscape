@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Diskscape
+Name=Diskvu
 Comment=Explore disk usage as an interactive treemap
-Exec=diskscape
-Icon=io.github.dvdavd.Diskscape
+Exec=diskvu
+Icon=io.github.dvdavd.Diskvu
 Categories=Utility;Filesystem;
 Keywords=disk;storage;space;filesystem;files;treemap;analyzer;usage;
 StartupNotify=true

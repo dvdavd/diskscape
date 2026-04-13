@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "platformthemewatcher.h"
 
-#ifdef DISKSCAPE_HAS_QT_DBUS
+#ifdef DISKVU_HAS_QT_DBUS
 #include <QDBusConnection>
 #include <QDBusVariant>
 
@@ -35,10 +35,10 @@ void FreedesktopColorSchemeWatcher::onSettingChanged(
     emit colorSchemeChanged(value.variant().toUInt() == 1);
 }
 
-#else // DISKSCAPE_HAS_QT_DBUS
+#else // DISKVU_HAS_QT_DBUS
 
 FreedesktopColorSchemeWatcher::FreedesktopColorSchemeWatcher(QObject* parent)
     : QObject(parent)
 {}
 
-#endif // DISKSCAPE_HAS_QT_DBUS
+#endif // DISKVU_HAS_QT_DBUS

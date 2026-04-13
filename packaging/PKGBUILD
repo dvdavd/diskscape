@@ -1,9 +1,9 @@
-pkgname=diskscape
+pkgname=diskvu
 pkgver=0.9.25
 pkgrel=1
 pkgdesc='Qt-based desktop application for exploring disk usage as an interactive treemap'
 arch=('x86_64')
-url='https://github.com/dvdavd/diskscape'
+url='https://github.com/dvdavd/diskvu'
 license=('MIT')
 depends=(
     'qt6-base'

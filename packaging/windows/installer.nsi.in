@@ -10,11 +10,11 @@ SetCompressor /SOLID lzma
 
 !include "MUI2.nsh"
 
-!define APP_NAME    "Diskscape"
-!define APP_EXE     "Diskscape.exe"
+!define APP_NAME    "Diskvu"
+!define APP_EXE     "Diskvu.exe"
 !define APP_VERSION "@PROJECT_VERSION@"
 !define PUBLISHER   "dvdavd"
-!define APP_URL     "https://github.com/dvdavd/diskscape"
+!define APP_URL     "https://github.com/dvdavd/diskvu"
 !define REG_UNINST  "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
 
 Name             "${APP_NAME} ${APP_VERSION}"
@@ -28,7 +28,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN         "$INSTDIR\${APP_EXE}"
-!define MUI_FINISHPAGE_RUN_TEXT    "Launch Diskscape"
+!define MUI_FINISHPAGE_RUN_TEXT    "Launch Diskvu"
 !insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -37,7 +37,7 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 
 ; ── Install ────────────────────────────────────────────────────────────────────
-Section "Diskscape" SecMain
+Section "Diskvu" SecMain
     SectionIn RO  ; required section
 
     SetOutPath "$INSTDIR"

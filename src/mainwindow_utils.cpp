@@ -35,10 +35,10 @@ static QHash<QString, QIcon> s_tintedFolderCache;
 
 namespace {
 
-constexpr auto kPaletteInitializedProperty = "diskscapePaletteInitialized";
-constexpr auto kPaletteOverrideProperty = "diskscapePaletteOverride";
-constexpr auto kCachedLightPaletteProperty = "diskscapeCachedLightPalette";
-constexpr auto kCachedDarkPaletteProperty = "diskscapeCachedDarkPalette";
+constexpr auto kPaletteInitializedProperty = "diskvuPaletteInitialized";
+constexpr auto kPaletteOverrideProperty = "diskvuPaletteOverride";
+constexpr auto kCachedLightPaletteProperty = "diskvuCachedLightPalette";
+constexpr auto kCachedDarkPaletteProperty = "diskvuCachedDarkPalette";
 
 bool isUsablePalette(const QPalette& palette)
 {
@@ -181,8 +181,8 @@ void dumpThemeState(const char* location, const QApplication& app)
     //        paletteLooksDark(appPal) ? "dark" : "light",
     //        stylePal.color(QPalette::Window).lightnessF(),
     //        paletteLooksDark(stylePal) ? "dark" : "light",
-    //        app.property("diskscapePaletteInitialized").toBool(),
-    //        app.property("diskscapePaletteOverride").toBool());
+    //        app.property("diskvuPaletteInitialized").toBool(),
+    //        app.property("diskvuPaletteOverride").toBool());
 }
 
 QFont generalUiFont()
@@ -442,7 +442,7 @@ bool systemUsesDarkColorScheme()
 
 QSettings appSettings()
 {
-    return QSettings(QStringLiteral("diskscape"), QStringLiteral("diskscape"));
+    return QSettings(QStringLiteral("diskvu"), QStringLiteral("diskvu"));
 }
 
 void saveSettingsAsync(std::function<void(QSettings&)> fn)
