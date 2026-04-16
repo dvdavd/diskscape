@@ -1749,6 +1749,7 @@ void SettingsDialog::buildPreviewTree()
     FileNode* workspace = createPreviewNode(m_previewArena, "workspace", 460, true, 0, m_previewRoot);
     FileNode* assets = createPreviewNode(m_previewArena, "assets", 360, true, 0, m_previewRoot);
     FileNode* system = createPreviewNode(m_previewArena, "system", 300, true, 0, m_previewRoot);
+    workspace->iconMark = static_cast<uint8_t>(FolderMark::CatDevelopment);
 
     createPreviewNode(m_previewArena, "README.md", 28, false, qRgb(96, 156, 214), workspace);
     createPreviewNode(m_previewArena, "bundle.weird", 26, false, qRgb(128, 128, 128), workspace);
