@@ -118,7 +118,7 @@
         <location filename="../src/mainwindow_utils.cpp" line="628"/>
         <location filename="../src/mainwindow_utils.cpp" line="736"/>
         <location filename="../src/mainwindow_utils.cpp" line="755"/>
-        <location filename="../src/mainwindow.cpp" line="3866"/>
+        <location filename="../src/mainwindow.cpp" line="3867"/>
         <location filename="../src/mainwindow_utils.cpp" line="628"/>
         <location filename="../src/mainwindow_utils.cpp" line="736"/>
         <location filename="../src/mainwindow_utils.cpp" line="755"/>
@@ -220,7 +220,7 @@ Find what’s using space at a glance.</translation>
     <message>
         <location filename="../src/mainwindow_landing.cpp" line="940"/>
         <location filename="../src/mainwindow_landing.cpp" line="942"/>
-        <location filename="../src/mainwindow.cpp" line="3437"/>
+        <location filename="../src/mainwindow.cpp" line="3430"/>
         <source>Favourites</source>
         <translation>Favorites</translation>
     </message>
@@ -263,15 +263,15 @@ Find what’s using space at a glance.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="512"/>
-        <location filename="../src/mainwindow.cpp" line="3656"/>
-        <location filename="../src/mainwindow.cpp" line="3665"/>
+        <location filename="../src/mainwindow.cpp" line="3657"/>
+        <location filename="../src/mainwindow.cpp" line="3666"/>
         <source>Delete Permanently</source>
         <translation>Delete Permanently</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="513"/>
-        <location filename="../src/mainwindow.cpp" line="3656"/>
-        <location filename="../src/mainwindow.cpp" line="3666"/>
+        <location filename="../src/mainwindow.cpp" line="3657"/>
+        <location filename="../src/mainwindow.cpp" line="3667"/>
         <source>Move to Wastebin</source>
         <translation>Move to Trash</translation>
     </message>
@@ -295,7 +295,7 @@ Find what’s using space at a glance.</translation>
     <message>
         <location filename="../src/mainwindow.cpp" line="628"/>
         <location filename="../src/mainwindow.cpp" line="3388"/>
-        <location filename="../src/mainwindow.cpp" line="4245"/>
+        <location filename="../src/mainwindow.cpp" line="4246"/>
         <source>Refresh</source>
         <translation>Refresh</translation>
     </message>
@@ -510,6 +510,11 @@ Find what’s using space at a glance.</translation>
         <translation>Scanning: %1</translation>
     </message>
     <message>
+        <location filename="../src/mainwindow.cpp" line="3503"/>
+        <source>New Group...</source>
+        <translation>New Group...</translation>
+    </message>
+    <message>
         <location filename="../src/mainwindow.cpp" line="1455"/>
         <source>Files: %1</source>
         <translation>Files: %1</translation>
@@ -679,107 +684,107 @@ Diskvu is licensed under the MIT License.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="3395"/>
-        <location filename="../src/mainwindow.cpp" line="3536"/>
+        <source>Mark Folder As</source>
+        <translation>Mark Folder As</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="3445"/>
+        <location filename="../src/mainwindow.cpp" line="3537"/>
         <source>Properties</source>
         <translation>Properties</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3402"/>
-        <source>Mark Folder As...</source>
-        <translation>Mark Folder As...</translation>
-    </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="3424"/>
+        <location filename="../src/mainwindow.cpp" line="3417"/>
         <source>Colour</source>
         <translation>Color</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3425"/>
+        <location filename="../src/mainwindow.cpp" line="3418"/>
         <source>Red</source>
         <translation>Red</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3426"/>
+        <location filename="../src/mainwindow.cpp" line="3419"/>
         <source>Orange</source>
         <translation>Orange</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3427"/>
+        <location filename="../src/mainwindow.cpp" line="3420"/>
         <source>Yellow</source>
         <translation>Yellow</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3428"/>
+        <location filename="../src/mainwindow.cpp" line="3421"/>
         <source>Green</source>
         <translation>Green</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3429"/>
+        <location filename="../src/mainwindow.cpp" line="3422"/>
         <source>Blue</source>
         <translation>Blue</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3430"/>
+        <location filename="../src/mainwindow.cpp" line="3423"/>
         <source>Purple</source>
         <translation>Purple</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3431"/>
+        <location filename="../src/mainwindow.cpp" line="3424"/>
         <source>Icon</source>
         <translation>Icon</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3432"/>
+        <location filename="../src/mainwindow.cpp" line="3425"/>
         <source>Backup</source>
         <translation>Backup</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3433"/>
+        <location filename="../src/mainwindow.cpp" line="3426"/>
         <source>Cloud</source>
         <translation>Cloud</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3434"/>
+        <location filename="../src/mainwindow.cpp" line="3427"/>
         <source>Development</source>
         <translation>Development</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3435"/>
+        <location filename="../src/mainwindow.cpp" line="3428"/>
         <source>Downloads</source>
         <translation>Downloads</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3436"/>
+        <location filename="../src/mainwindow.cpp" line="3429"/>
         <source>Encrypted</source>
         <translation>Encrypted</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3438"/>
+        <location filename="../src/mainwindow.cpp" line="3431"/>
         <source>Games</source>
         <translation>Games</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3439"/>
+        <location filename="../src/mainwindow.cpp" line="3432"/>
         <source>Music</source>
         <translation>Music</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3440"/>
+        <location filename="../src/mainwindow.cpp" line="3433"/>
         <source>Photos</source>
         <translation>Photos</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3441"/>
+        <location filename="../src/mainwindow.cpp" line="3434"/>
         <source>Temporary</source>
         <translation>Temporary</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3442"/>
+        <location filename="../src/mainwindow.cpp" line="3435"/>
         <source>Video</source>
         <translation>Video</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3446"/>
+        <location filename="../src/mainwindow.cpp" line="3439"/>
         <source>Clear Mark</source>
         <translation>Clear Mark</translation>
     </message>
@@ -794,83 +799,78 @@ Diskvu is licensed under the MIT License.</translation>
         <translation>Add .%1 to File Type</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3503"/>
-        <source>New group...</source>
-        <translation>New group...</translation>
-    </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="3546"/>
+        <location filename="../src/mainwindow.cpp" line="3547"/>
         <source>You do not have permission to delete this item</source>
         <translation>You do not have permission to delete this item</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3548"/>
+        <location filename="../src/mainwindow.cpp" line="3549"/>
         <source>Cannot delete while a scan is in progress</source>
         <translation>Cannot delete while a scan is in progress</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3588"/>
+        <location filename="../src/mainwindow.cpp" line="3589"/>
         <source>Copied path: %1</source>
         <translation>Copied path: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3607"/>
+        <location filename="../src/mainwindow.cpp" line="3608"/>
         <source>Failed to delete: %1</source>
         <translation>Failed to delete: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3608"/>
+        <location filename="../src/mainwindow.cpp" line="3609"/>
         <source>Failed to move to wastebin: %1</source>
         <translation>Failed to move to trash: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3640"/>
+        <location filename="../src/mainwindow.cpp" line="3641"/>
         <source>Failed to open: %1</source>
         <translation>Failed to open: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3658"/>
+        <location filename="../src/mainwindow.cpp" line="3659"/>
         <source>Delete %1 permanently?</source>
         <translation>Delete %1 permanently?</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3659"/>
+        <location filename="../src/mainwindow.cpp" line="3660"/>
         <source>Move %1 to the wastebin?</source>
         <translation>Move %1 to the trash?</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3661"/>
+        <location filename="../src/mainwindow.cpp" line="3662"/>
         <source>This will permanently remove it from disk.</source>
         <translation>This will permanently remove it from disk.</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3662"/>
+        <location filename="../src/mainwindow.cpp" line="3663"/>
         <source>You can restore it later from the system wastebin if supported.</source>
         <translation>You can restore it later from the system trash if supported.</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="3817"/>
-        <location filename="../src/mainwindow.cpp" line="4011"/>
+        <location filename="../src/mainwindow.cpp" line="3818"/>
+        <location filename="../src/mainwindow.cpp" line="4012"/>
         <source>Free Space: %1</source>
         <translation>Free Space: %1</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="4013"/>
+        <location filename="../src/mainwindow.cpp" line="4014"/>
         <source>%1  (%2)</source>
         <translation>%1  (%2)</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="4258"/>
+        <location filename="../src/mainwindow.cpp" line="4259"/>
         <source>Cancel</source>
         <translation>Cancel</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="4270"/>
+        <location filename="../src/mainwindow.cpp" line="4271"/>
         <source>Refreshing</source>
         <translation>Refreshing</translation>
     </message>
     <message>
-        <location filename="../src/mainwindow.cpp" line="4378"/>
+        <location filename="../src/mainwindow.cpp" line="4379"/>
         <source>Refreshed: %1</source>
         <translation>Refreshed: %1</translation>
     </message>

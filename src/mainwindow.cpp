@@ -3288,14 +3288,7 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
             QStyle::SP_BrowserReload));
         refreshAction->setEnabled(canRefresh);
         menu.addSeparator();
-        propertiesAction = menu.addAction(tr("Properties"));
-        propertiesAction->setIcon(menuActionIcon({"document-properties", "file-info"},
-            QStringLiteral(":/assets/tabler-icons/file-info.svg"),
-            QStringLiteral(":/assets/tabler-icons/file-info.svg"),
-            QStyle::SP_FileDialogContentsView));
-
-        menu.addSeparator();
-        QMenu* markAsMenu = menu.addMenu(tr("Mark Folder As..."));
+        QMenu* markAsMenu = menu.addMenu(tr("Mark Folder As"));
         markAsMenu->setIcon(menuActionIcon({"bookmark-new"},
             QStringLiteral(":/assets/tabler-icons/highlight.svg"),
             QStringLiteral(":/assets/tabler-icons/highlight.svg"),
@@ -3343,6 +3336,13 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
                 markFolder(node, FolderMark::None);
             });
         }
+
+        menu.addSeparator();
+        propertiesAction = menu.addAction(tr("Properties"));
+        propertiesAction->setIcon(menuActionIcon({"document-properties", "file-info"},
+            QStringLiteral(":/assets/tabler-icons/file-info.svg"),
+            QStringLiteral(":/assets/tabler-icons/file-info.svg"),
+            QStyle::SP_FileDialogContentsView));
 
         connect(markAsMenu, &QMenu::triggered, this,
                 [this, node](QAction* action) {
@@ -3396,7 +3396,7 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
                 a->setData(info.index);
             }
             addToTypeMenu->addSeparator();
-            QAction* newGroupAction = addToTypeMenu->addAction(tr("New group..."));
+            QAction* newGroupAction = addToTypeMenu->addAction(tr("New Group..."));
             newGroupAction->setIcon(menuActionIcon({"list-add"},
                 QStringLiteral(":/assets/tabler-icons/category-plus.svg"),
                 QStringLiteral(":/assets/tabler-icons/category-plus.svg"),
@@ -3429,6 +3429,7 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
             });
         }
 
+        menu.addSeparator();
         propertiesAction = menu.addAction(tr("Properties"));
         propertiesAction->setIcon(menuActionIcon({"document-properties", "file-info"},
             QStringLiteral(":/assets/tabler-icons/file-info.svg"),
