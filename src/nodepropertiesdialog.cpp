@@ -73,10 +73,10 @@ private:
 
 static void countItems(const FileNode* node, int& files, int& dirs)
 {
-    for (const FileNode* child : node->children) {
-        if (child->isVirtual)
+    for (const FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (child->isVirtual())
             continue;
-        if (child->isDirectory) {
+        if (child->isDirectory()) {
             ++dirs;
             countItems(child, files, dirs);
         } else {
@@ -204,7 +204,7 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
         row->setSpacing(10);
 
         auto* icon = new QLabel(this);
-        const QStyle::StandardPixmap sp = node->isDirectory ? QStyle::SP_DirIcon
+        const QStyle::StandardPixmap sp = node->isDirectory() ? QStyle::SP_DirIcon
                                                             : QStyle::SP_FileIcon;
         icon->setPixmap(style()->standardIcon(sp).pixmap(32, 32));
         icon->setFixedSize(36, 36);
@@ -233,7 +233,7 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
     sep();
 
     // Treemap preview (directories with children only)
-    const bool hasTreemap = node->isDirectory && !node->children.empty() && node->size > 0;
+    const bool hasTreemap = node->isDirectory() && node->firstChild && node->size > 0;
     if (hasTreemap) {
         auto* treemap = new TreemapWidget(this);
         treemap->setMinimumHeight(200);
@@ -241,7 +241,8 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
         treemap->setWheelZoomEnabled(false);
         treemap->setAttribute(Qt::WA_TransparentForMouseEvents);
         treemap->applySettings(settings);
-        treemap->setRoot(const_cast<FileNode*>(node), std::move(arena), false, false);
+        auto snapshot = makeTreemapSnapshot(const_cast<FileNode*>(node), std::move(arena));
+        treemap->setRoot(std::move(snapshot), false, false);
         vbox->addWidget(treemap, 1);
         sep();
     }
@@ -304,7 +305,7 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
         }
 
         // Items (directories)
-        if (node->isDirectory) {
+        if (node->isDirectory()) {
             int files = 0, dirs = 0;
             countItems(node, files, dirs);
             addText(tr("Items"),
@@ -314,9 +315,9 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
         }
 
         // Type
-        if (node->isVirtual) {
+        if (node->isVirtual()) {
             addText(tr("Type"), tr("Free space"));
-        } else if (node->isDirectory) {
+        } else if (node->isDirectory()) {
             addText(tr("Type"), tr("Folder"));
         } else {
             const QMimeType mime = QMimeDatabase().mimeTypeForFile(
@@ -325,7 +326,7 @@ NodePropertiesDialog::NodePropertiesDialog(const FileNode* node,
         }
 
         // Modified, permissions, owner (not meaningful for virtual nodes)
-        if (!node->isVirtual && info.exists()) {
+        if (!node->isVirtual() && info.exists()) {
             addText(tr("Modified"),
                 QLocale::system().toString(info.lastModified(), QLocale::ShortFormat));
 

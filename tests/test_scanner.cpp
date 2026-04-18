@@ -9,13 +9,16 @@
 #include <QTemporaryDir>
 #include <QtTest/QtTest>
 #include <functional>
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif
 
 // Collect all non-virtual nodes into a flat list.
 static void collectNodes(FileNode* node, QList<FileNode*>& out)
 {
-    if (!node || node->isVirtual) return;
+    if (!node || node->isVirtual()) return;
     out.append(node);
-    for (FileNode* child : node->children)
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling)
         collectNodes(child, out);
 }
 
@@ -23,7 +26,7 @@ static FileNode* findByName(FileNode* root, const QString& name)
 {
     if (!root) return nullptr;
     if (root->name == name) return root;
-    for (FileNode* child : root->children)
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling)
         if (FileNode* found = findByName(child, name))
             return found;
     return nullptr;
@@ -73,8 +76,8 @@ private slots:
         QVERIFY(result.root != nullptr);
 
         FileNode* fileNode = nullptr;
-        for (FileNode* child : result.root->children) {
-            if (!child->isDirectory && !child->isVirtual) {
+        for (FileNode* child = result.root->firstChild; child; child = child->nextSibling) {
+            if (!child->isDirectory() && !child->isVirtual()) {
                 fileNode = child;
                 break;
             }
@@ -97,9 +100,9 @@ private slots:
 
         qint64 leafSum = 0;
         std::function<void(FileNode*)> sum = [&](FileNode* node) {
-            if (!node->isDirectory && !node->isVirtual)
+            if (!node->isDirectory() && !node->isVirtual())
                 leafSum += node->size;
-            for (FileNode* child : node->children)
+            for (FileNode* child = node->firstChild; child; child = child->nextSibling)
                 sum(child);
         };
         sum(result.root);
@@ -113,7 +116,7 @@ private slots:
         QVERIFY(dir.isValid());
         const ScanResult result = Scanner::scan(dir.path());
         QVERIFY(result.root != nullptr);
-        QVERIFY(!result.root->absolutePath.isEmpty());
+        QVERIFY(!result.root->computePath().isEmpty());
     }
 
     // ── tree structure ────────────────────────────────────────────────────────
@@ -130,7 +133,7 @@ private slots:
         QVERIFY(result.root->parent == nullptr);
 
         std::function<void(FileNode*)> check = [&](FileNode* node) {
-            for (FileNode* child : node->children) {
+            for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
                 QCOMPARE(child->parent, node);
                 check(child);
             }
@@ -147,7 +150,7 @@ private slots:
         const ScanResult result = Scanner::scan(dir.path());
         QVERIFY(result.root != nullptr);
 
-        for (FileNode* child : result.root->children) {
+        for (FileNode* child = result.root->firstChild; child; child = child->nextSibling) {
             if (child->name == "hello.txt") {
                 const QString expected = QDir::cleanPath(dir.filePath("hello.txt"));
                 QCOMPARE(child->computePath(), expected);
@@ -166,11 +169,11 @@ private slots:
 
         const ScanResult result = Scanner::scan(dir.path());
         QVERIFY(result.root != nullptr);
-        QVERIFY(result.root->isDirectory);
+        QVERIFY(result.root->isDirectory());
 
-        for (FileNode* child : result.root->children) {
+        for (FileNode* child = result.root->firstChild; child; child = child->nextSibling) {
             if (child->name == "subdir") {
-                QVERIFY(child->isDirectory);
+                QVERIFY(child->isDirectory());
                 return;
             }
         }
@@ -198,7 +201,7 @@ private slots:
         std::function<bool(FileNode*, const QString&)> hasName
             = [&](FileNode* node, const QString& name) -> bool {
             if (node->name == name) return true;
-            for (FileNode* child : node->children)
+            for (FileNode* child = node->firstChild; child; child = child->nextSibling)
                 if (hasName(child, name)) return true;
             return false;
         };
@@ -218,7 +221,7 @@ private slots:
         const ScanResult result = Scanner::scan(dir.path());
         FileNode* file = findByName(result.root, "plain.txt");
         QVERIFY(file != nullptr);
-        QVERIFY(!file->isDirectory);
+        QVERIFY(!file->isDirectory());
     }
 
     void scan_zeroByteFile_includedWithSizeZero()
@@ -242,7 +245,7 @@ private slots:
         const ScanResult result = Scanner::scan(dir.path());
         FileNode* subdir = findByName(result.root, "emptydir");
         QVERIFY(subdir != nullptr);
-        QVERIFY(subdir->isDirectory);
+        QVERIFY(subdir->isDirectory());
         QCOMPARE(subdir->size, qint64(0));
     }
 
@@ -377,10 +380,10 @@ private slots:
             writeFile(dir.filePath(QString("d%1/f.txt").arg(i)), 50);
         }
 
-        std::atomic_bool cancel{true};
+        auto cancel = std::make_shared<std::atomic_bool>(true);
         // Must not crash and must return within the test timeout
         const ScanResult result = Scanner::scan(
-            dir.path(), TreemapSettings::defaults(), {}, {}, {}, {}, &cancel);
+            dir.path(), TreemapSettings::defaults(), {}, {}, {}, {}, cancel);
         QVERIFY(true); // reaching here without crash is the pass condition
     }
 
@@ -418,6 +421,37 @@ private slots:
         QVERIFY(findByName(result.root, "sub") != nullptr);
         QVERIFY(findByName(result.root, "f.txt") != nullptr);
     }
+
+#ifndef Q_OS_WIN
+    void scan_hardLinks_deduplicatesMultiplyLinkedFiles()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+
+        QVERIFY(QDir(dir.path()).mkpath("a/b/c"));
+
+        const QString original = dir.filePath("a/b/c/original.bin");
+        const QString linked = dir.filePath("a/b/c/linked.bin");
+        QVERIFY(writeFile(original, 1024));
+        QVERIFY(::link(QFile::encodeName(original).constData(),
+                       QFile::encodeName(linked).constData()) == 0);
+
+        const ScanResult result = Scanner::scan(dir.path(), TreemapSettings{});
+        QVERIFY(result.root != nullptr);
+
+        FileNode* originalNode = findByName(result.root, "original.bin");
+        FileNode* linkedNode = findByName(result.root, "linked.bin");
+        QVERIFY(originalNode != nullptr);
+        QVERIFY(linkedNode != nullptr);
+        // Hard links are always deduplicated: size counts once, displaySize counts both.
+        QCOMPARE(result.root->size, qint64(1024));
+        QCOMPARE(result.root->displaySize, qint64(2048));
+        QCOMPARE(originalNode->size + linkedNode->size, qint64(1024));
+        QVERIFY(originalNode->size == 0 || linkedNode->size == 0);
+        QVERIFY(originalNode->hasHardLinks());
+        QVERIFY(linkedNode->hasHardLinks());
+    }
+#endif
 };
 
 QTEST_MAIN(TestScanner)

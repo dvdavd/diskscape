@@ -5,18 +5,7 @@
 #include "filenode.h"
 #include "scanner.h"
 #include <QPointF>
-#include <QString>
 #include <vector>
-
-struct ViewStatePaths {
-    QString nodePath;
-    qreal cameraScale = 1.0;
-    QPointF cameraOrigin;
-    int semanticDepth = 0;
-    QString semanticFocusPath;
-    QString semanticLiveRootPath;
-    qreal currentRootLayoutAspectRatio = 0.0;
-};
 
 struct ScanActivityUpdate {
     QString path;

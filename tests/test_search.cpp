@@ -53,7 +53,6 @@ private slots:
         NodeArena arena;
         FileNode* root = arena.alloc();
         root->name = "root";
-        root->absolutePath = "/root";
 
         auto index = buildSearchIndex(root);
         QVERIFY(index != nullptr);
@@ -64,13 +63,16 @@ private slots:
     {
         NodeArena arena;
         FileNode* root = arena.alloc();
-        root->isDirectory = true;
-        root->absolutePath = "/r";
+        root->name = "/r";
+        root->setIsDirectory(true);
 
         FileNode* a = arena.alloc(); a->name = "a"; a->parent = root;
         FileNode* b = arena.alloc(); b->name = "b"; b->parent = root;
-        FileNode* v = arena.alloc(); v->name = "free"; v->isVirtual = true; v->parent = root;
-        root->children = {a, b, v};
+        FileNode* v = arena.alloc(); v->name = "free"; v->setIsVirtual(true); v->parent = root;
+        
+        root->firstChild = a;
+        a->nextSibling = b;
+        b->nextSibling = v;
 
         auto index = buildSearchIndex(root);
         // root + a + b = 3; virtual node excluded
@@ -82,28 +84,33 @@ private slots:
     {
         NodeArena arena;
         FileNode* root = arena.alloc();
-        root->isDirectory = true;
-        root->absolutePath = "/r";
+        root->name = "/r";
+        root->setIsDirectory(true);
 
         FileNode* real = arena.alloc(); real->name = "real"; real->parent = root;
-        FileNode* virt = arena.alloc(); virt->name = "virt"; virt->isVirtual = true; virt->parent = root;
-        root->children = {real, virt};
+        FileNode* virt = arena.alloc(); virt->name = "virt"; virt->setIsVirtual(true); virt->parent = root;
+        
+        root->firstChild = real;
+        real->nextSibling = virt;
 
         auto index = buildSearchIndex(root);
 
         QCOMPARE(virt->id, uint32_t(UINT32_MAX)); // untouched
         for (FileNode* n : index->nodes)
-            QVERIFY(!n->isVirtual);
+            QVERIFY(!n->isVirtual());
     }
 
     void buildSearchIndex_idsAreSequential()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* a = arena.alloc(); a->name = "a"; a->parent = root;
         FileNode* b = arena.alloc(); b->name = "b"; b->parent = root;
         FileNode* c = arena.alloc(); c->name = "c"; c->parent = root;
-        root->children = {a, b, c};
+        
+        root->firstChild = a;
+        a->nextSibling = b;
+        b->nextSibling = c;
 
         buildSearchIndex(root);
 
@@ -119,7 +126,6 @@ private slots:
         NodeArena arena;
         FileNode* root = arena.alloc();
         root->name = "README.MD";
-        root->absolutePath = "/r";
 
         auto index = buildSearchIndex(root);
         QVERIFY(nameInIndex(*index, root, "readme.md"));
@@ -128,9 +134,9 @@ private slots:
     void buildSearchIndex_offsetsAndLensCorrect()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* child = arena.alloc(); child->name = "hello.txt"; child->parent = root;
-        root->children = {child};
+        root->firstChild = child;
 
         auto index = buildSearchIndex(root);
 
@@ -143,10 +149,12 @@ private slots:
     void search_emptyPatternMatchesAll()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* a = arena.alloc(); a->name = "alpha.txt"; a->parent = root;
         FileNode* b = arena.alloc(); b->name = "beta.cpp"; b->parent = root;
-        root->children = {a, b};
+        
+        root->firstChild = a;
+        a->nextSibling = b;
 
         auto index = buildSearchIndex(root);
         // Empty pattern: find("") always matches, so all indexed nodes are returned
@@ -157,10 +165,12 @@ private slots:
     void search_literalMatchFindsNode()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* a = arena.alloc(); a->name = "report.pdf"; a->parent = root;
         FileNode* b = arena.alloc(); b->name = "image.png"; b->parent = root;
-        root->children = {a, b};
+        
+        root->firstChild = a;
+        a->nextSibling = b;
 
         auto index = buildSearchIndex(root);
         const auto matches = searchNodes(*index, "report");
@@ -171,9 +181,9 @@ private slots:
     void search_matchIsCaseInsensitive()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* child = arena.alloc(); child->name = "MyDocument.DOCX"; child->parent = root;
-        root->children = {child};
+        root->firstChild = child;
 
         auto index = buildSearchIndex(root);
 
@@ -186,9 +196,9 @@ private slots:
     void search_noMatchReturnsEmpty()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* child = arena.alloc(); child->name = "notes.txt"; child->parent = root;
-        root->children = {child};
+        root->firstChild = child;
 
         auto index = buildSearchIndex(root);
         const auto matches = searchNodes(*index, "zzznomatch");
@@ -198,10 +208,12 @@ private slots:
     void search_substringMatchWorks()
     {
         NodeArena arena;
-        FileNode* root = arena.alloc(); root->isDirectory = true; root->absolutePath = "/r";
+        FileNode* root = arena.alloc(); root->name = "/r"; root->setIsDirectory(true);
         FileNode* a = arena.alloc(); a->name = "screenshot_2026.png"; a->parent = root;
         FileNode* b = arena.alloc(); b->name = "readme.txt"; b->parent = root;
-        root->children = {a, b};
+        
+        root->firstChild = a;
+        a->nextSibling = b;
 
         auto index = buildSearchIndex(root);
 

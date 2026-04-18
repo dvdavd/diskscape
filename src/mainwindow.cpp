@@ -75,6 +75,13 @@ constexpr int kDirectorySortValueRole = Qt::UserRole + 5;
 constexpr int kDirectoryColorRole = Qt::UserRole + 6;
 constexpr int kDirectoryNodeRole = Qt::UserRole + 7;
 constexpr int kLegendColorRole = Qt::UserRole + 2;
+constexpr QEvent::Type kProcessQueuedScanProgressEvent =
+    static_cast<QEvent::Type>(QEvent::User + 1);
+constexpr QEvent::Type kProcessQueuedScanActivityEvent =
+    static_cast<QEvent::Type>(QEvent::User + 2);
+constexpr QEvent::Type kProcessQueuedPermissionErrorsEvent =
+    static_cast<QEvent::Type>(QEvent::User + 3);
+constexpr qint64 kScanStatusUpdateIntervalMs = 50;
 constexpr QChar kLeftToRightIsolate(0x2066);
 constexpr QChar kPopDirectionalIsolate(0x2069);
 constexpr auto kComfortableItemViewStyle =
@@ -108,20 +115,6 @@ void applyComfortableItemSpacing(QAbstractItemView* view)
     view->setStyleSheet(usesFusionStyle(view)
         ? QString::fromLatin1(kComfortableItemViewStyle)
         : QString());
-}
-
-void applyStableItemTextBrush(QTreeWidget* tree, QTreeWidgetItem* item)
-{
-    if (!tree || !item) {
-        return;
-    }
-
-    const QBrush textBrush = tree->palette().brush(tree->isEnabled() ? QPalette::Active
-                                                                     : QPalette::Disabled,
-                                                   QPalette::Text);
-    for (int column = 0; column < tree->columnCount(); ++column) {
-        item->setForeground(column, textBrush);
-    }
 }
 
 QStringList defaultFavouritePaths()
@@ -247,9 +240,12 @@ bool hasDirectoryChildren(const FileNode* node)
         return false;
     }
 
-    return std::any_of(node->children.begin(), node->children.end(), [](const FileNode* child) {
-        return child && child->isDirectory && !child->isVirtual;
-    });
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (child->isDirectory() && !child->isVirtual()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 qint64 directFileBytes(const FileNode* node)
@@ -259,9 +255,9 @@ qint64 directFileBytes(const FileNode* node)
     }
 
     qint64 total = 0;
-    for (const FileNode* child : node->children) {
-        if (child && !child->isDirectory && !child->isVirtual) {
-            total += child->size;
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (!child->isDirectory() && !child->isVirtual()) {
+            total += child->displaySize;
         }
     }
     return total;
@@ -283,17 +279,6 @@ QIcon directoryTreeFilesIcon()
     return IconUtils::themeIcon({"files"},
         QStringLiteral(":/assets/tabler-icons/files.svg"),
         QStringLiteral(":/assets/tabler-icons/files.svg"));
-}
-
-void refreshDirectoryTreeItemTextBrushes(QTreeWidget* tree, QTreeWidgetItem* item)
-{
-    if (!tree || !item) {
-        return;
-    }
-    applyStableItemTextBrush(tree, item);
-    for (int i = 0; i < item->childCount(); ++i) {
-        refreshDirectoryTreeItemTextBrushes(tree, item->child(i));
-    }
 }
 
 void refreshDirectoryTreeIcons(QTreeWidgetItem* item)
@@ -648,7 +633,7 @@ void MainWindow::setupToolbar(QSettings& store)
     m_limitToSameFilesystemAction->setChecked(m_settings.limitToSameFilesystem);
     m_limitToSameFilesystemAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+S")));
     setActionTooltip(m_limitToSameFilesystemAction,
-        tr("Stay on the current filesystem while scanning (refresh required)"));
+        tr("Don’t cross into other mounted filesystems during scans (refresh required)"));
     connect(m_limitToSameFilesystemAction, &QAction::toggled, this, &MainWindow::onLimitToSameFilesystemToggled);
 #endif
 
@@ -696,9 +681,6 @@ void MainWindow::setupToolbar(QSettings& store)
 #ifndef Q_OS_WIN
     if (m_limitToSameFilesystemAction) {
         m_toolbar->addAction(m_limitToSameFilesystemAction);
-        if (QToolButton* singleFilesystemButton = qobject_cast<QToolButton*>(m_toolbar->widgetForAction(m_limitToSameFilesystemAction))) {
-            singleFilesystemButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-        }
         m_toolbar->addSeparator();
     }
 #endif
@@ -1156,7 +1138,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
         m_typeLegendTree->setColumnWidth(2, 70);
     }
     connect(m_typeLegendTree, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
-        if (m_scanInProgress && !m_backgroundRefreshInProgress) {
+        if (isTreeInteractionBlocked()) {
             return;
         }
         if (!m_treemapWidget) {
@@ -1172,7 +1154,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
     });
     connect(m_directoryTree, &QTreeWidget::itemExpanded, this, &MainWindow::populateDirectoryTreeChildren);
     connect(m_directoryTree, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item, int) {
-        if (!item || !m_scanResult.root || !m_treemapWidget) {
+        if (isTreeInteractionBlocked() || !item || !m_scanResult.root || !m_treemapWidget) {
             return;
         }
         QString path = item->data(0, kDirectoryPathRole).toString();
@@ -1187,7 +1169,7 @@ void MainWindow::setupCentralWidget(QSettings& store)
         }
     });
     connect(m_directoryTree, &QTreeWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        if (!m_directoryTree || !m_scanResult.root) {
+        if (isTreeInteractionBlocked() || !m_directoryTree || !m_scanResult.root) {
             return;
         }
         QTreeWidgetItem* item = m_directoryTree->itemAt(pos);
@@ -1216,6 +1198,8 @@ void MainWindow::setupCentralWidget(QSettings& store)
 
     connect(m_treemapWidget, &TreemapWidget::nodeActivated,
             this, &MainWindow::onNodeActivated);
+    connect(m_treemapWidget, &TreemapWidget::nodeOpenFile,
+            this, &MainWindow::onNodeOpenFile);
     connect(m_treemapWidget, &TreemapWidget::nodeHovered,
             this, &MainWindow::onNodeHovered);
     connect(m_treemapWidget, &TreemapWidget::backRequested,
@@ -1399,6 +1383,25 @@ MainWindow::~MainWindow()
     }
 }
 
+bool MainWindow::event(QEvent* event)
+{
+    switch (event->type()) {
+    case kProcessQueuedScanProgressEvent:
+        processQueuedScanProgress();
+        return true;
+    case kProcessQueuedScanActivityEvent:
+        processQueuedScanActivity();
+        return true;
+    case kProcessQueuedPermissionErrorsEvent:
+        processQueuedPermissionErrors();
+        return true;
+    default:
+        break;
+    }
+
+    return QMainWindow::event(event);
+}
+
 QMenu* MainWindow::createPopupMenu()
 {
     return nullptr;
@@ -1407,6 +1410,16 @@ QMenu* MainWindow::createPopupMenu()
 void MainWindow::syncFilesystemWatchControllerState()
 {
     if (!m_watchController) {
+        return;
+    }
+
+    // inotify on NFS/CIFS generates constant GETATTR polling RPCs for each watched
+    // directory, which saturates the NFS server's metadata queue and severely degrades
+    // scan performance. Skip watching entirely for non-local filesystems.
+    const bool isLocalScan = m_scanResult.filesystems.isEmpty()
+        || m_scanResult.filesystems.first().isLocal;
+    if (!isLocalScan) {
+        m_watchController->clear();
         return;
     }
 
@@ -1438,13 +1451,13 @@ void MainWindow::clearCompletedStatusLabels()
 
 void MainWindow::updateCompletedStatusLabels()
 {
-    if (!m_treemapWidget) {
+    if (!m_treemapWidget || m_scanInProgress) {
         clearCompletedStatusLabels();
         return;
     }
 
     const FileNode* current = m_treemapWidget->currentNode();
-    if (!current || current->isVirtual) {
+    if (!current || current->isVirtual()) {
         clearCompletedStatusLabels();
         return;
     }
@@ -1456,7 +1469,17 @@ void MainWindow::updateCompletedStatusLabels()
         m_completedFilesStatusLabel->setVisible(true);
     }
     if (m_completedTotalStatusLabel) {
-        m_completedTotalStatusLabel->setText(tr("Total: %1").arg(locale.formattedDataSize(currentStats.totalSize)));
+        const qint64 apparentBytes = currentStats.totalSize;
+        const qint64 dedupBytes = current->size;
+        QString totalText;
+        if (dedupBytes < apparentBytes) {
+            totalText = tr("Total: %1 (%2 on disk)")
+                .arg(locale.formattedDataSize(apparentBytes),
+                     locale.formattedDataSize(dedupBytes));
+        } else {
+            totalText = tr("Total: %1").arg(locale.formattedDataSize(apparentBytes));
+        }
+        m_completedTotalStatusLabel->setText(totalText);
         m_completedTotalStatusLabel->setVisible(true);
     }
     if (m_completedFreeStatusLabel) {
@@ -1550,7 +1573,7 @@ void MainWindow::onThemeSettled()
         applyComfortableItemSpacing(m_directoryTree);
         for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i) {
             refreshDirectoryTreeIcons(m_directoryTree->topLevelItem(i));
-            refreshDirectoryTreeItemTextBrushes(m_directoryTree, m_directoryTree->topLevelItem(i));
+            refreshTreeItemTextBrushes(m_directoryTree, m_directoryTree->topLevelItem(i));
         }
         m_directoryTree->viewport()->update();
     }
@@ -1741,6 +1764,12 @@ void MainWindow::setLandingVisible(bool visible)
         if (m_toggleFilterPanelAction) {
             m_toggleFilterPanelAction->setEnabled(false);
         }
+        if (m_toggleDirectoryTreeAction) {
+            m_toggleDirectoryTreeAction->setEnabled(false);
+        }
+        if (m_toggleTypeLegendAction) {
+            m_toggleTypeLegendAction->setEnabled(false);
+        }
         if (m_treemapWidget) {
             m_treemapWidget->setFilterParams(FilterParams{});
         }
@@ -1750,6 +1779,12 @@ void MainWindow::setLandingVisible(bool visible)
         }
         if (m_toggleFilterPanelAction) {
             m_toggleFilterPanelAction->setEnabled(true);
+        }
+        if (m_toggleDirectoryTreeAction) {
+            m_toggleDirectoryTreeAction->setEnabled(true);
+        }
+        if (m_toggleTypeLegendAction) {
+            m_toggleTypeLegendAction->setEnabled(true);
         }
     }
 
@@ -1786,7 +1821,7 @@ void MainWindow::refreshCurrentScan()
     }
 
     FileNode* const scanRoot = m_scanResult.root;
-    const QString path = scanRoot && !scanRoot->isVirtual
+    const QString path = scanRoot && !scanRoot->isVirtual()
         ? scanRoot->computePath().trimmed()
         : m_currentPath.trimmed();
     if (path.isEmpty()) {
@@ -1857,8 +1892,12 @@ void MainWindow::activatePath(const QString& path, bool forceScan)
         return;
     }
 
-    if (!forceScan && pathIsWithinRoot(absolutePath, m_currentPath) && m_scanResult.root) {
-        if (FileNode* node = findNodeByPath(m_scanResult.root, absolutePath)) {
+    FileNode* navigationRoot = (!m_scanInProgress || m_backgroundRefreshInProgress)
+        ? m_scanResult.root
+        : nullptr;
+
+    if (!forceScan && pathIsWithinRoot(absolutePath, m_currentPath) && navigationRoot) {
+        if (FileNode* node = findNodeByPath(navigationRoot, absolutePath)) {
             navigateTo(node, true);
             return;
         }
@@ -1870,6 +1909,28 @@ void MainWindow::activatePath(const QString& path, bool forceScan)
     startScan(absolutePath, forceScan, false);
 }
 
+bool MainWindow::isTreeInteractionBlocked() const
+{
+    return m_scanInProgress && !m_backgroundRefreshInProgress;
+}
+
+bool MainWindow::startPendingScanRequestIfNeeded()
+{
+    if (!m_hasPendingScanRequest || m_closeRequested) {
+        return false;
+    }
+
+    const QString pendingScanPath = m_pendingScanPath;
+    const bool pendingScanForceRescan = m_pendingScanForceRescan;
+    const bool pendingScanBackgroundRefresh = m_pendingScanBackgroundRefresh;
+    m_hasPendingScanRequest = false;
+    m_pendingScanPath.clear();
+    m_pendingScanForceRescan = false;
+    m_pendingScanBackgroundRefresh = false;
+    startScan(pendingScanPath, pendingScanForceRescan, pendingScanBackgroundRefresh);
+    return true;
+}
+
 void MainWindow::startScan(const QString& dir, bool forceRescan, bool backgroundRefresh)
 {
     const QString normalizedDir = QFileInfo(dir).absoluteFilePath();
@@ -1879,6 +1940,17 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
 
     if (m_postProcessInProgress) {
         m_postProcessStale = true;
+    }
+
+    if (m_incrementalRefreshInProgress || m_postProcessInProgress) {
+        m_pendingScanPath = normalizedDir;
+        m_pendingScanForceRescan = true;
+        m_pendingScanBackgroundRefresh = backgroundRefresh;
+        m_hasPendingScanRequest = true;
+        cancelRefreshOperation();
+        statusBar()->showMessage(tr("Cancelling current refresh and switching to %1...")
+                                     .arg(QDir::toNativeSeparators(normalizedDir)));
+        return;
     }
 
     if (m_scanInProgress) {
@@ -1900,6 +1972,7 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
 
     m_currentPath = normalizedDir;
     m_scanInProgress = true;
+    m_scanStartTime.start();
     m_scanCancelled = false;
     m_backgroundRefreshInProgress = backgroundRefresh;
     m_scanCancelToken = std::make_shared<std::atomic_bool>(false);
@@ -1908,6 +1981,13 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
     m_liveScanResult = {};
     m_latestScannedBytes = 0;
     m_latestScanActivityPath = normalizedDir;
+    m_scanProgressPostedCount = 0;
+    m_scanProgressProcessedCount = 0;
+    m_scanActivityPostedCount = 0;
+    m_scanActivityProcessedCount = 0;
+    m_scanPermissionPostedCount = 0;
+    m_scanPermissionProcessedCount = 0;
+    m_scanStatusUpdateTimer.invalidate();
     clearCompletedStatusLabels();
     {
         QMutexLocker locker(&m_scanProgressMutex);
@@ -1947,7 +2027,7 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
         m_treemapWidget->setScanPath(normalizedDir);
         m_treemapWidget->setScanInProgress(true);
         m_treemapWidget->setWheelZoomEnabled(false);
-        m_treemapWidget->setRoot(nullptr, {}, false, false);
+        m_treemapWidget->setRoot(nullptr, false, false);
         m_treemapWidget->viewport()->setCursor(Qt::WaitCursor);
     } else {
         statusBar()->showMessage(tr("Refreshing %1...").arg(QDir::toNativeSeparators(normalizedDir)));
@@ -1958,27 +2038,29 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
     m_scanPreviewSlotOpen = std::make_shared<std::atomic_bool>(true);
     const std::shared_ptr<std::atomic_bool> previewSlotOpen = m_scanPreviewSlotOpen;
     const QPointer<MainWindow> self = this;
-    const bool liveScanPreview = m_settings.liveScanPreview;
+    const int scanPreviewMode = m_settings.scanPreviewMode;
     const TreemapSettings settings = m_settings;
-    QFuture<ScanResult> future = QtConcurrent::run([self, liveScanPreview, settings, normalizedDir, backgroundRefresh, cancelToken, previewSlotOpen]() {
-        const Scanner::ProgressCallback progressCallback = (!backgroundRefresh && liveScanPreview)
+    QFuture<ScanResult> future = QtConcurrent::run([self, scanPreviewMode, settings, normalizedDir, backgroundRefresh, cancelToken, previewSlotOpen]() {
+        const bool wantPreview = !backgroundRefresh && scanPreviewMode != TreemapSettings::ScanPreviewNone;
+        const Scanner::ProgressCallback progressCallback = wantPreview
             ? Scanner::ProgressCallback([self](ScanResult snapshot) {
             if (!self) return;
             bool shouldQueue = false;
             {
                 QMutexLocker locker(&self->m_scanProgressMutex);
                 self->m_pendingScanProgress = std::move(snapshot);
+                ++self->m_scanProgressPostedCount;
                 if (!self->m_scanProgressQueued) {
                     self->m_scanProgressQueued = true;
                     shouldQueue = true;
                 }
             }
             if (shouldQueue) {
-                QMetaObject::invokeMethod(self.data(), &MainWindow::processQueuedScanProgress, Qt::QueuedConnection);
+                QCoreApplication::postEvent(self.data(), new QEvent(kProcessQueuedScanProgressEvent));
             }
         })
             : Scanner::ProgressCallback{};
-        const Scanner::ProgressReadyCallback progressReadyCallback = (!backgroundRefresh && liveScanPreview)
+        const Scanner::ProgressReadyCallback progressReadyCallback = wantPreview
             ? Scanner::ProgressReadyCallback([previewSlotOpen]() {
                 return previewSlotOpen && previewSlotOpen->load(std::memory_order_relaxed);
             })
@@ -1990,13 +2072,14 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
             {
                 QMutexLocker locker(&self->m_scanActivityMutex);
                 self->m_pendingScanActivity = ScanActivityUpdate{currentPath, totalBytesSeen};
+                ++self->m_scanActivityPostedCount;
                 if (!self->m_scanActivityQueued) {
                     self->m_scanActivityQueued = true;
                     shouldQueue = true;
                 }
             }
             if (shouldQueue) {
-                QMetaObject::invokeMethod(self.data(), &MainWindow::processQueuedScanActivity, Qt::QueuedConnection);
+                QCoreApplication::postEvent(self.data(), new QEvent(kProcessQueuedScanActivityEvent));
             }
         })
             : Scanner::ActivityCallback{};
@@ -2006,15 +2089,14 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
             {
                 QMutexLocker locker(&self->m_permissionErrorMutex);
                 self->m_pendingPermissionErrors.append(warning);
+                ++self->m_scanPermissionPostedCount;
                 if (!self->m_permissionErrorQueued) {
                     self->m_permissionErrorQueued = true;
                     shouldQueue = true;
                 }
             }
             if (shouldQueue) {
-                QMetaObject::invokeMethod(self.data(),
-                    &MainWindow::processQueuedPermissionErrors,
-                    Qt::QueuedConnection);
+                QCoreApplication::postEvent(self.data(), new QEvent(kProcessQueuedPermissionErrorsEvent));
             }
         };
         if (previewSlotOpen) {
@@ -2022,7 +2104,7 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
         }
         ScanResult result = Scanner::scan(normalizedDir, settings, progressCallback,
                                           progressReadyCallback, activityCallback,
-                                          errorCallback, cancelToken.get());
+                                          errorCallback, cancelToken);
         sortChildrenBySizeRecursive(result.root);
         ColorUtils::assignColors(result.root, settings);
         return result;
@@ -2032,7 +2114,8 @@ void MainWindow::startScan(const QString& dir, bool forceRescan, bool background
 
 void MainWindow::navigateBack()
 {
-    if (m_scanInProgress && !m_backgroundRefreshInProgress)
+    const bool navigationBlocked = isTreeInteractionBlocked();
+    if (navigationBlocked)
         return;
 
     if (m_treemapWidget && m_treemapWidget->hasOpenImagePreview()) {
@@ -2061,9 +2144,14 @@ void MainWindow::navigateBack()
     while (!m_history.empty()) {
         const TreemapWidget::ViewState previous = m_history.back();
         m_history.pop_back();
-        if (previous.node) {
-            if (m_showFreeSpaceInOverview && previous.node != m_treemapWidget->currentNode())
-                placeFreeSpaceNodes(previous.node);
+        if (previous.nodeKey.isValid()) {
+            if (m_showFreeSpaceInOverview) {
+                if (FileNode* target = m_scanResult.snapshot->findNode(previous.nodeKey)) {
+                    if (target != m_treemapWidget->currentNode()) {
+                        placeFreeSpaceNodes(target);
+                    }
+                }
+            }
             m_treemapWidget->restoreViewState(previous);
             refreshTypeLegendAsync(m_treemapWidget->currentNode());
             updateCurrentViewUi();
@@ -2077,7 +2165,8 @@ void MainWindow::navigateBack()
 
 void MainWindow::navigateUp()
 {
-    if (m_scanInProgress && !m_backgroundRefreshInProgress)
+    const bool navigationBlocked = isTreeInteractionBlocked();
+    if (navigationBlocked)
         return;
 
     FileNode* current = m_treemapWidget->currentNode();
@@ -2091,7 +2180,7 @@ void MainWindow::navigateUp()
 
 void MainWindow::zoomInCentered()
 {
-    if (m_scanInProgress || !m_treemapWidget) {
+    if (isTreeInteractionBlocked() || !m_treemapWidget) {
         return;
     }
 
@@ -2101,7 +2190,7 @@ void MainWindow::zoomInCentered()
 
 void MainWindow::zoomOutCentered()
 {
-    if (m_scanInProgress || !m_treemapWidget) {
+    if (isTreeInteractionBlocked() || !m_treemapWidget) {
         return;
     }
 
@@ -2116,7 +2205,7 @@ void MainWindow::zoomOutCentered()
 
 void MainWindow::resetZoom()
 {
-    if (m_scanInProgress || !m_treemapWidget) {
+    if (isTreeInteractionBlocked() || !m_treemapWidget) {
         return;
     }
 
@@ -2139,7 +2228,7 @@ void MainWindow::toggleFreeSpaceView(bool enabled)
         store.setValue("treemap/showFreeSpaceInOverview", enabled);
     });
 
-    if (!m_treemapWidget || m_scanInProgress || !m_scanResult.root) {
+    if (!m_treemapWidget || isTreeInteractionBlocked() || !m_scanResult.root) {
         if (m_toggleFreeSpaceAction) {
             m_toggleFreeSpaceAction->blockSignals(true);
             m_toggleFreeSpaceAction->setChecked(m_showFreeSpaceInOverview);
@@ -2166,10 +2255,6 @@ void MainWindow::onScanProgress(ScanResult scanResult)
         return;
     }
 
-    const ViewStatePaths previousViewPaths = m_treemapWidget
-        ? captureViewStatePaths(m_treemapWidget->currentViewState())
-        : ViewStatePaths{};
-
     m_liveScanResult = std::move(scanResult);
 
     // Live preview snapshots already preserve the scanner-assigned colors.
@@ -2177,15 +2262,7 @@ void MainWindow::onScanProgress(ScanResult scanResult)
     // can reorder children to keep the active branch visible during scanning.
     m_treemapWidget->setScanPath(m_liveScanResult.currentScanPath);
     m_treemapWidget->setScanInProgress(true);
-    m_treemapWidget->setRoot(m_liveScanResult.root, m_liveScanResult.arena, false, false);
-
-    if (m_treemapWidget && !previousViewPaths.nodePath.isEmpty()) {
-        const TreemapWidget::ViewState remappedView =
-            remapViewStatePaths(previousViewPaths, m_liveScanResult.root);
-        if (remappedView.node) {
-            m_treemapWidget->restoreViewStateImmediate(remappedView);
-        }
-    }
+    m_treemapWidget->setRoot(m_liveScanResult.snapshot, false, false);
 
     m_latestScannedBytes = std::max(m_latestScannedBytes, m_liveScanResult.root->size);
     if (!m_liveScanResult.currentScanPath.isEmpty()) {
@@ -2207,7 +2284,7 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
 
     FileNode* node = reinterpret_cast<FileNode*>(
         item->data(0, kDirectoryNodeRole).value<quintptr>());
-    if (!node || !node->isDirectory || node->isVirtual) {
+    if (!node || !node->isDirectory() || node->isVirtual()) {
         item->setData(0, kDirectoryLoadedRole, true);
         return;
     }
@@ -2222,15 +2299,16 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
     qDeleteAll(oldChildren);
 
     const qint64 rootSize = m_scanResult.root->size;
-    const qint64 parentSize = std::max<qint64>(1, node->size);
+    const qint64 parentSize = std::max<qint64>(1, node == m_scanResult.root ? node->size : node->displaySize);
     const qint64 filesSize = directFileBytes(node);
     bool filesInserted = false;
-    for (FileNode* child : node->children) {
-        if (!child || !child->isDirectory || child->isVirtual) {
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (!child->isDirectory() || child->isVirtual()) {
             continue;
         }
 
-        if (!filesInserted && filesSize > child->size) {
+        const qint64 childDisplaySize = child->displaySize;
+        if (!filesInserted && filesSize > childDisplaySize) {
             auto* filesItem = new DirectoryTreeItem(item);
             filesItem->setText(0, tr("Files"));
             filesItem->setIcon(0, directoryTreeFilesIcon());
@@ -2255,7 +2333,7 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
         childItem->setText(0, directoryDisplayName(child));
         const QColor childColor = QColor::fromRgba(child->color);
         childItem->setIcon(0, directoryTreeFolderIcon(childColor));
-        childItem->setText(2, QLocale::system().formattedDataSize(child->size));
+        childItem->setText(2, QLocale::system().formattedDataSize(childDisplaySize));
         applyStableItemTextBrush(m_directoryTree, childItem);
         childItem->setData(0, kDirectoryPathRole, childPath);
         childItem->setData(0, kDirectoryLoadedRole, false);
@@ -2264,14 +2342,14 @@ void MainWindow::populateDirectoryTreeChildren(QTreeWidgetItem* item)
         childItem->setData(0, kDirectoryNodeRole,
                            QVariant::fromValue(reinterpret_cast<quintptr>(child)));
         childItem->setData(1, kDirectoryUsagePercentRole,
-                           static_cast<double>(child->size) / static_cast<double>(parentSize));
-        childItem->setData(1, kDirectorySortValueRole, child->size);
-        childItem->setData(2, kDirectorySortValueRole, child->size);
+                           static_cast<double>(childDisplaySize) / static_cast<double>(parentSize));
+        childItem->setData(1, kDirectorySortValueRole, childDisplaySize);
+        childItem->setData(2, kDirectorySortValueRole, childDisplaySize);
         childItem->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         childItem->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
         childItem->setToolTip(0, QDir::toNativeSeparators(childPath));
-        childItem->setToolTip(1, tr("%1 of parent folder").arg(relativeUsageText(child->size, parentSize)));
-        childItem->setToolTip(2, QLocale::system().formattedDataSize(child->size));
+        childItem->setToolTip(1, tr("%1 of parent folder").arg(relativeUsageText(childDisplaySize, parentSize)));
+        childItem->setToolTip(2, QLocale::system().formattedDataSize(childDisplaySize));
         if (hasDirectoryChildren(child)) {
             auto* placeholder = new QTreeWidgetItem(childItem);
             placeholder->setData(0, kDirectoryDummyRole, true);
@@ -2320,7 +2398,7 @@ void MainWindow::syncDirectoryTreeSelection()
 
     const QSignalBlocker blocker(m_directoryTree);
     FileNode* current = m_treemapWidget ? m_treemapWidget->currentNode() : nullptr;
-    if (!m_scanResult.root || !current || current->isVirtual || !current->isDirectory) {
+    if (!m_scanResult.root || !current || current->isVirtual() || !current->isDirectory()) {
         m_directoryTree->clearSelection();
         m_directoryTree->setCurrentItem(nullptr);
         return;
@@ -2441,11 +2519,13 @@ void MainWindow::processQueuedScanProgress()
             pending = std::move(m_pendingScanProgress);
             m_pendingScanProgress.reset();
         }
+
         if (m_scanPreviewSlotOpen) {
             m_scanPreviewSlotOpen->store(true, std::memory_order_relaxed);
         }
 
         onScanProgress(std::move(*pending));
+        ++m_scanProgressProcessedCount;
     }
 }
 
@@ -2469,6 +2549,7 @@ void MainWindow::processQueuedScanActivity()
 
         m_latestScanActivityPath = pending->path;
         m_latestScannedBytes = std::max(m_latestScannedBytes, pending->totalBytesSeen);
+        ++m_scanActivityProcessedCount;
         updateScanStatusMessage();
     }
 }
@@ -2485,6 +2566,8 @@ void MainWindow::processQueuedPermissionErrors()
 
     if (drained.isEmpty())
         return;
+
+    m_scanPermissionProcessedCount += drained.size();
 
     const bool wasEmpty = m_permissionErrors.isEmpty();
     for (const ScanWarning& warning : drained) {
@@ -2507,9 +2590,10 @@ void MainWindow::processQueuedPermissionErrors()
     }
 }
 
-void MainWindow::updateScanStatusMessage()
+void MainWindow::updateScanStatusMessage(bool force)
 {
     if (!m_scanInProgress || m_scanCancelled) {
+        m_scanStatusUpdateTimer.invalidate();
         if (m_scanSeenStatusLabel) {
             m_scanSeenStatusLabel->clear();
             m_scanSeenStatusLabel->setVisible(false);
@@ -2522,13 +2606,18 @@ void MainWindow::updateScanStatusMessage()
         return;
     }
 
-    clearCompletedStatusLabels();
+    if (!force && m_scanStatusUpdateTimer.isValid()
+            && m_scanStatusUpdateTimer.elapsed() < kScanStatusUpdateIntervalMs) {
+        return;
+    }
+    m_scanStatusUpdateTimer.restart();
 
     const QString scanPath = m_latestScanActivityPath.isEmpty()
         ? QDir::toNativeSeparators(m_currentPath)
         : QDir::toNativeSeparators(m_latestScanActivityPath);
     const QString scannedStr = formatPinnedDataSize(m_latestScannedBytes);
     statusBar()->showMessage(tr("Scanning..."));
+
     if (m_scanSeenStatusLabel) {
         m_scanSeenStatusLabel->setText(tr("Seen: %1").arg(scannedStr));
         m_scanSeenStatusLabel->setVisible(true);
@@ -2587,11 +2676,6 @@ void MainWindow::scheduleTreeMaintenance()
     });
 }
 
-void MainWindow::restoreHistoryFromPaths(const std::vector<ViewStatePaths>& historyPaths, FileNode* root)
-{
-    m_history = remapHistoryPaths(historyPaths, root);
-}
-
 void MainWindow::onScanFinished()
 {
     if (m_scanCancelled) {
@@ -2622,7 +2706,7 @@ void MainWindow::onScanFinished()
         m_pendingScanBackgroundRefresh = false;
         syncFilesystemWatchControllerState();
         setSearchBusy(false);
-        updateScanStatusMessage();
+        updateScanStatusMessage(true);
         statusBar()->showMessage(hasPendingScanRequest ? tr("Starting next scan...") : tr("Scan cancelled"));
         m_scanCancelToken.reset();
         if (m_closeRequested) {
@@ -2642,26 +2726,16 @@ void MainWindow::onScanFinished()
     m_scanCancelToken.reset();
     setRefreshBusy(false);
     setSearchBusy(false);
-    updateScanStatusMessage();
+    updateScanStatusMessage(true);
     {
         QMutexLocker locker(&m_scanProgressMutex);
         m_pendingScanProgress.reset();
         m_scanProgressQueued = false;
     }
-    const ViewStatePaths previousViewPaths = backgroundRefresh
-        ? captureViewStatePaths(m_treemapWidget->currentViewState())
-        : ViewStatePaths{};
-    const std::vector<ViewStatePaths> previousHistoryPaths = [&]() {
-        std::vector<ViewStatePaths> captured;
-        if (!backgroundRefresh) {
-            return captured;
-        }
-        captured.reserve(m_history.size());
-        for (const TreemapWidget::ViewState& state : m_history) {
-            captured.push_back(captureViewStatePaths(state));
-        }
-        return captured;
-    }();
+    const TreemapWidget::ViewState previousView = backgroundRefresh
+        ? m_treemapWidget->currentViewState()
+        : TreemapWidget::ViewState{};
+
     m_postProcessStale = true;
     if (m_directoryTree) m_directoryTree->clear();
     m_mountPointFreeNode = nullptr;
@@ -2690,25 +2764,17 @@ void MainWindow::onScanFinished()
     m_treemapWidget->setScanInProgress(false);
     m_treemapWidget->setScanPath(m_currentPath);
     setLandingVisible(false);
+
     if (backgroundRefresh) {
-        m_treemapWidget->setRoot(m_scanResult.root, m_scanResult.arena, false, false);
-        FileNode* const refreshedRoot = m_scanResult.root;
-        QTimer::singleShot(0, this, [this, previousHistoryPaths, previousViewPaths, refreshedRoot]() {
-            if (m_closeRequested || m_scanResult.root != refreshedRoot) {
-                return;
-            }
-            restoreHistoryFromPaths(previousHistoryPaths, m_scanResult.root);
-            const TreemapWidget::ViewState remappedView =
-                remapViewStatePaths(previousViewPaths, m_scanResult.root);
-            m_treemapWidget->restoreViewStateImmediate(remappedView);
-            refreshTypeLegendAsync(m_treemapWidget->currentNode());
-            updateNavigationActions();
-            updateCurrentViewUi();
-        });
+        m_treemapWidget->setRoot(m_scanResult.snapshot, false, false);
+        m_treemapWidget->restoreViewStateImmediate(previousView);
+        refreshTypeLegendAsync(m_treemapWidget->currentNode());
+        updateNavigationActions();
+        updateCurrentViewUi();
     } else {
         m_treemapWidget->viewport()->unsetCursor();
         m_history.clear();
-        m_treemapWidget->setRoot(m_scanResult.root, m_scanResult.arena, false);
+        m_treemapWidget->setRoot(m_scanResult.snapshot, false);
         updateNavigationActions();
         updateCurrentViewUi();
     }
@@ -2744,7 +2810,7 @@ void MainWindow::cancelScan()
     if (!m_backgroundRefreshInProgress) {
         m_treemapWidget->viewport()->unsetCursor();
         m_liveScanResult = {};
-        m_treemapWidget->setRoot(nullptr, {}, false, false);
+        m_treemapWidget->setRoot(nullptr, false, false);
         m_treemapWidget->setScanInProgress(false);
     }
     statusBar()->showMessage(m_backgroundRefreshInProgress ? tr("Cancelling refresh...") : tr("Cancelling scan..."));
@@ -2808,19 +2874,28 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 void MainWindow::onNodeActivated(FileNode* node)
 {
-    if (m_scanInProgress)
+    if (isTreeInteractionBlocked())
         return;
 
-    if (!node || node->isVirtual) return;
+    if (!node || node->isVirtual()) return;
 
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         navigateTo(node, true);
     }
 }
 
+void MainWindow::onNodeOpenFile(FileNode* node)
+{
+    if (isTreeInteractionBlocked() || !node || node->isDirectory() || node->isVirtual())
+        return;
+
+    const QString path = node->computePath();
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
 void MainWindow::onZoomInRequested(FileNode* node, QPointF anchorPos)
 {
-    if (m_scanInProgress || !node || !node->isDirectory || node->isVirtual) {
+    if (isTreeInteractionBlocked() || !node || !node->isDirectory() || node->isVirtual()) {
         return;
     }
 
@@ -2829,7 +2904,7 @@ void MainWindow::onZoomInRequested(FileNode* node, QPointF anchorPos)
 
 void MainWindow::onZoomOutRequested(QPointF anchorPos)
 {
-    if (m_scanInProgress) {
+    if (isTreeInteractionBlocked()) {
         return;
     }
 
@@ -2970,23 +3045,23 @@ void MainWindow::markFolder(FileNode* node, FolderMark mark)
     if (mark == FolderMark::None) {
         m_settings.folderColorMarks.remove(path);
         m_settings.folderIconMarks.remove(path);
-        node->colorMark = 0;
-        node->iconMark = 0;
+        node->setColorMark(0);
+        node->setIconMark(0);
     } else if (isFolderColorMark(mark)) {
         if (m_settings.folderColorMarks.value(path) == mark) {
             m_settings.folderColorMarks.remove(path);
-            node->colorMark = 0;
+            node->setColorMark(0);
         } else {
             m_settings.folderColorMarks.insert(path, mark);
-            node->colorMark = static_cast<uint8_t>(mark);
+            node->setColorMark(static_cast<uint8_t>(mark));
         }
     } else {
         if (m_settings.folderIconMarks.value(path) == mark) {
             m_settings.folderIconMarks.remove(path);
-            node->iconMark = 0;
+            node->setIconMark(0);
         } else {
             m_settings.folderIconMarks.insert(path, mark);
-            node->iconMark = static_cast<uint8_t>(mark);
+            node->setIconMark(static_cast<uint8_t>(mark));
         }
     }
     m_settings.sanitize();
@@ -3034,20 +3109,30 @@ void MainWindow::applyTreemapSettings(const TreemapSettings& settings, bool pers
 
     if (freeSpaceFilterChanged && m_treemapWidget && m_scanResult.root
             && !m_scanResult.filesystems.isEmpty()) {
-        const ViewStatePaths previousViewPaths =
-            captureViewStatePaths(m_treemapWidget->currentViewState());
+        const TreemapWidget::ViewState previousView = m_treemapWidget->currentViewState();
         // Detach the mount-point node before re-injecting (it may belong to an old FS entry).
         if (m_mountPointFreeNode && m_mountPointFreeNode->parent) {
-            auto& ch = m_mountPointFreeNode->parent->children;
-            ch.erase(std::remove(ch.begin(), ch.end(), m_mountPointFreeNode), ch.end());
+            FileNode* parent = m_mountPointFreeNode->parent;
+            if (parent->firstChild == m_mountPointFreeNode) {
+                parent->firstChild = m_mountPointFreeNode->nextSibling;
+            } else {
+                FileNode* prev = parent->firstChild;
+                while (prev && prev->nextSibling != m_mountPointFreeNode) {
+                    prev = prev->nextSibling;
+                }
+                if (prev) {
+                    prev->nextSibling = m_mountPointFreeNode->nextSibling;
+                }
+            }
             m_mountPointFreeNode->parent = nullptr;
+            m_mountPointFreeNode->nextSibling = nullptr;
         }
         m_freeSpaceNodes = reinjectFreeSpaceNodes(
             m_scanResult, m_currentPath, m_showFreeSpaceInOverview, m_settings);
         placeFreeSpaceNodes(m_treemapWidget->currentNode());
-        m_treemapWidget->setRoot(m_scanResult.root, m_scanResult.arena, false, false);
-        m_treemapWidget->restoreViewStateImmediate(
-            remapViewStatePaths(previousViewPaths, m_scanResult.root));
+        m_treemapWidget->setRoot(m_scanResult.snapshot, false, false);
+        m_treemapWidget->restoreViewStateImmediate(previousView);
+
         updateNavigationActions();
         updateCurrentViewUi();
         refreshTypeLegendAsync(m_scanResult.root);
@@ -3082,18 +3167,14 @@ void MainWindow::syncColorThemeWithSystem(bool darkMode, bool persist)
 void MainWindow::launchIncrementalRefresh(const QString& refreshPath)
 {
     m_activeRefreshPath = refreshPath;
-    m_preRefreshViewPaths = captureViewStatePaths(m_treemapWidget->currentViewState());
-    m_preRefreshHistoryPaths.clear();
-    m_preRefreshHistoryPaths.reserve(m_history.size());
-    for (const TreemapWidget::ViewState& s : m_history) {
-        m_preRefreshHistoryPaths.push_back(captureViewStatePaths(s));
-    }
 
     m_incrementalRefreshInProgress = true;
     m_incrementalRefreshCancelled = false;
     m_refreshCancelToken = std::make_shared<std::atomic_bool>(false);
     syncFilesystemWatchControllerState();
     setRefreshBusy(true);
+    setSearchBusy(false);
+    updateNavigationActions();
     m_permissionErrors.clear();
     {
         QMutexLocker locker(&m_permissionErrorMutex);
@@ -3128,12 +3209,10 @@ void MainWindow::launchIncrementalRefresh(const QString& refreshPath)
                 }
             }
             if (shouldQueue) {
-                QMetaObject::invokeMethod(self.data(),
-                    &MainWindow::processQueuedPermissionErrors,
-                    Qt::QueuedConnection);
+                QCoreApplication::postEvent(self.data(), new QEvent(kProcessQueuedPermissionErrorsEvent));
             }
         };
-        return Scanner::scan(refreshPath, settings, {}, {}, {}, errorCallback, cancelToken.get());
+        return Scanner::scan(refreshPath, settings, {}, {}, {}, errorCallback, cancelToken);
     });
     m_refreshWatcher->setFuture(future);
 }
@@ -3149,7 +3228,12 @@ void MainWindow::onIncrementalRefreshFinished()
 
     if (refreshCancelled || !refreshed.root || m_scanInProgress) {
         setRefreshBusy(false);
+        setSearchBusy(false);
+        updateNavigationActions();
         rebuildFilesystemWatchers();
+        if (startPendingScanRequestIfNeeded()) {
+            return;
+        }
     } else {
         const QString refreshPath = m_activeRefreshPath;
         IncrementalRefreshResult input;
@@ -3160,7 +3244,12 @@ void MainWindow::onIncrementalRefreshFinished()
             FileNode* targetNode = findNodeByPath(m_scanResult.root, refreshPath);
             if (!targetNode || !targetNode->parent) {
                 setRefreshBusy(false);
+                setSearchBusy(false);
+                updateNavigationActions();
                 rebuildFilesystemWatchers();
+                if (startPendingScanRequestIfNeeded()) {
+                    return;
+                }
                 if (m_closeRequested) {
                     QTimer::singleShot(0, qApp, &QCoreApplication::quit);
                 }
@@ -3173,8 +3262,16 @@ void MainWindow::onIncrementalRefreshFinished()
                 ColorUtils::topLevelFolderBranchHue(targetNode->name, m_settings));
         }
 
+        if (m_closeRequested) {
+            setRefreshBusy(false);
+            QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+            return;
+        }
+
         m_postProcessInProgress = true;
         m_postProcessStale = false;
+        setSearchBusy(false);
+        updateNavigationActions();
         QFuture<IncrementalRefreshResult> future = QtConcurrent::run(
             [input = std::move(input), currentPath = m_currentPath,
              showFreeSpaceInOverview = m_showFreeSpaceInOverview,
@@ -3208,12 +3305,17 @@ void MainWindow::onPostProcessFinished()
 {
     IncrementalRefreshResult refreshed = m_postProcessWatcher->future().takeResult();
     m_postProcessInProgress = false;
-    syncFilesystemWatchControllerState();
 
-    if (m_postProcessStale || m_scanInProgress || !refreshed.refreshed.root) {
+    if (m_postProcessStale || m_scanInProgress || !refreshed.refreshed.root || m_closeRequested) {
         m_postProcessStale = false;
         setRefreshBusy(false);
+        setSearchBusy(false);
+        updateNavigationActions();
         rebuildFilesystemWatchers();
+        syncFilesystemWatchControllerState();
+        if (startPendingScanRequestIfNeeded()) {
+            return;
+        }
     } else {
         finalizeIncrementalRefresh(std::move(refreshed));
     }
@@ -3226,7 +3328,7 @@ void MainWindow::onPostProcessFinished()
 
 void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
 {
-    if (!node || node->isVirtual) {
+    if (isTreeInteractionBlocked() || !node || node->isVirtual()) {
         return;
     }
 
@@ -3244,20 +3346,22 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
     QAction* refreshAction = nullptr;
     QAction* previewAction = nullptr;
     QAction* propertiesAction = nullptr;
-    if (!node->isDirectory && m_treemapWidget && m_treemapWidget->nodeSupportsImagePreview(node)) {
+    if (!node->isDirectory() && m_treemapWidget && m_treemapWidget->nodeSupportsImagePreview(node)) {
         previewAction = menu.addAction(tr("Preview"));
         previewAction->setIcon(menuActionIcon({"image-x-generic", "photo"},
             QStringLiteral(":/assets/tabler-icons/photo.svg"),
             QStringLiteral(":/assets/tabler-icons/photo.svg"),
             QStyle::SP_FileIcon));
-        QFont previewFont = previewAction->font();
-        previewFont.setBold(true);
-        previewAction->setFont(previewFont);
-        menu.setDefaultAction(previewAction);
+        if (!m_settings.doubleClickToOpen) {
+            QFont previewFont = previewAction->font();
+            previewFont.setBold(true);
+            previewAction->setFont(previewFont);
+            menu.setDefaultAction(previewAction);
+        }
         menu.addSeparator();
     }
 
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         zoomAction = menu.addAction(tr("Zoom In"));
         zoomAction->setIcon(menuActionIcon({"zoom-in"},
             QStringLiteral(":/assets/tabler-icons/zoom-in.svg"),
@@ -3357,6 +3461,12 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
             QStringLiteral(":/assets/tabler-icons/folder.svg"),
             QStringLiteral(":/assets/tabler-icons/folder.svg"),
             QStyle::SP_DialogOpenButton));
+        if (m_settings.doubleClickToOpen) {
+            QFont openFont = openAction->font();
+            openFont.setBold(true);
+            openAction->setFont(openFont);
+            menu.setDefaultAction(openAction);
+        }
         revealAction = menu.addAction(tr("Show in File Manager"));
         revealAction->setIcon(menuActionIcon({"system-file-manager", "folder-open"},
             QStringLiteral(":/assets/tabler-icons/folder.svg"),
@@ -3476,7 +3586,7 @@ void MainWindow::onNodeContextMenuRequested(FileNode* node, QPoint globalPos)
     }
 
     if (revealAction && chosen == revealAction) {
-        revealPathInFileManager(path, node->isDirectory);
+        revealPathInFileManager(path, node->isDirectory());
         return;
     }
 
@@ -3647,18 +3757,18 @@ void MainWindow::navigateTo(FileNode* node, bool pushHistory,
 void MainWindow::updateNavigationActions()
 {
     FileNode* current = m_treemapWidget->currentNode();
-    const bool navigationEnabled = !m_scanInProgress || m_backgroundRefreshInProgress;
+    const bool navigationEnabled = !isTreeInteractionBlocked();
     const bool previewOpen = m_treemapWidget && m_treemapWidget->hasOpenImagePreview();
     m_backAction->setEnabled(navigationEnabled && (previewOpen || !m_history.empty()));
     m_upAction->setEnabled(navigationEnabled && current && current->parent != nullptr);
     if (m_zoomInAction) {
-        m_zoomInAction->setEnabled(current != nullptr);
+        m_zoomInAction->setEnabled(navigationEnabled && current != nullptr);
     }
     if (m_zoomOutAction) {
-        m_zoomOutAction->setEnabled(current != nullptr);
+        m_zoomOutAction->setEnabled(navigationEnabled && current != nullptr);
     }
     if (m_resetZoomAction) {
-        m_resetZoomAction->setEnabled(current != nullptr);
+        m_resetZoomAction->setEnabled(navigationEnabled && current != nullptr);
     }
     if (m_toggleFreeSpaceAction) {
         const bool hasFreeSpaceNode = m_scanResult.root && !m_freeSpaceNodes.empty();
@@ -3667,6 +3777,24 @@ void MainWindow::updateNavigationActions()
         m_toggleFreeSpaceAction->blockSignals(true);
         m_toggleFreeSpaceAction->setChecked(m_showFreeSpaceInOverview);
         m_toggleFreeSpaceAction->blockSignals(false);
+    }
+    if (m_directoryTree) {
+        const bool wasEnabled = m_directoryTree->isEnabled();
+        m_directoryTree->setEnabled(navigationEnabled);
+        if (m_directoryTree->isEnabled() != wasEnabled) {
+            for (int i = 0; i < m_directoryTree->topLevelItemCount(); ++i) {
+                refreshTreeItemTextBrushes(m_directoryTree, m_directoryTree->topLevelItem(i));
+            }
+        }
+    }
+    if (m_typeLegendTree) {
+        const bool wasEnabled = m_typeLegendTree->isEnabled();
+        m_typeLegendTree->setEnabled(navigationEnabled);
+        if (m_typeLegendTree->isEnabled() != wasEnabled) {
+            for (int i = 0; i < m_typeLegendTree->topLevelItemCount(); ++i) {
+                refreshTreeItemTextBrushes(m_typeLegendTree, m_typeLegendTree->topLevelItem(i));
+            }
+        }
     }
     updateCompletedStatusLabels();
     updateToolbarResponsiveLayout();
@@ -3686,7 +3814,7 @@ void MainWindow::updateWindowTitle()
         return;
     }
 
-    const QString sizeText = QLocale::system().formattedDataSize(current->size);
+    const QString sizeText = QLocale::system().formattedDataSize(current->displaySize);
     setWindowTitle(QStringLiteral("%1 (%2) - %3").arg(current->name, sizeText, appTitle));
 }
 
@@ -3706,7 +3834,7 @@ void MainWindow::updateCurrentViewUi()
         return;
     }
 
-    if (current->isVirtual) {
+    if (current->isVirtual()) {
         syncPathCombo(m_currentPath);
         syncDirectoryTreeSelection();
         statusBar()->showMessage(
@@ -3732,9 +3860,20 @@ void MainWindow::placeFreeSpaceNodes(FileNode* currentNode)
 
     // Detach any previously active mount-point free-space node.
     if (m_mountPointFreeNode && m_mountPointFreeNode->parent) {
-        auto& ch = m_mountPointFreeNode->parent->children;
-        ch.erase(std::remove(ch.begin(), ch.end(), m_mountPointFreeNode), ch.end());
+        FileNode* parent = m_mountPointFreeNode->parent;
+        if (parent->firstChild == m_mountPointFreeNode) {
+            parent->firstChild = m_mountPointFreeNode->nextSibling;
+        } else {
+            FileNode* prev = parent->firstChild;
+            while (prev && prev->nextSibling != m_mountPointFreeNode) {
+                prev = prev->nextSibling;
+            }
+            if (prev) {
+                prev->nextSibling = m_mountPointFreeNode->nextSibling;
+            }
+        }
         m_mountPointFreeNode->parent = nullptr;
+        m_mountPointFreeNode->nextSibling = nullptr;
     }
 
     if (!m_showFreeSpaceInOverview || !currentNode || currentNode == m_scanResult.root)
@@ -3761,77 +3900,117 @@ void MainWindow::placeFreeSpaceNodes(FileNode* currentNode)
 
     m_mountPointFreeNode->name = QCoreApplication::translate("ColorUtils", "Free Space");
     m_mountPointFreeNode->size = matchingFs->freeBytes;
-    m_mountPointFreeNode->isVirtual = true;
-    m_mountPointFreeNode->isDirectory = false;
+    m_mountPointFreeNode->displaySize = matchingFs->freeBytes;
+    m_mountPointFreeNode->setIsVirtual(true);
+    m_mountPointFreeNode->setIsDirectory(false);
     m_mountPointFreeNode->color = m_settings.freeSpaceColor.rgba();
     m_mountPointFreeNode->parent = currentNode;
-    currentNode->children.push_back(m_mountPointFreeNode);
-    std::sort(currentNode->children.begin(), currentNode->children.end(),
+
+    std::vector<FileNode*> vectorChildren;
+    for (FileNode* child = currentNode->firstChild; child; child = child->nextSibling) {
+        if (child != m_mountPointFreeNode) {
+            vectorChildren.push_back(child);
+        }
+    }
+    vectorChildren.push_back(m_mountPointFreeNode);
+
+    std::sort(vectorChildren.begin(), vectorChildren.end(),
               [](const FileNode* a, const FileNode* b) { return a->size > b->size; });
+
+    if (!vectorChildren.empty()) {
+        currentNode->firstChild = vectorChildren[0];
+        for (size_t i = 0; i < vectorChildren.size() - 1; ++i) {
+            vectorChildren[i]->nextSibling = vectorChildren[i + 1];
+        }
+        vectorChildren.back()->nextSibling = nullptr;
+    } else {
+        currentNode->firstChild = nullptr;
+    }
 }
 
 void MainWindow::setFreeSpaceVisible(bool visible)
 {
-    if (!m_scanResult.root || m_freeSpaceNodes.empty() || !m_treemapWidget) {
+    FileNode* root = m_scanResult.root;
+    if (!root || m_freeSpaceNodes.empty() || !m_treemapWidget) {
         return;
     }
 
-    auto& children = m_scanResult.root->children;
-    const bool currentlyVisible = std::any_of(children.begin(), children.end(),
-                                               [](const FileNode* c) { return c && c->isVirtual; });
+    bool currentlyVisible = false;
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (child->isVirtual()) {
+            currentlyVisible = true;
+            break;
+        }
+    }
+
     if (currentlyVisible == visible) {
-        refreshTypeLegendAsync(m_scanResult.root);
+        refreshTypeLegendAsync(root);
         updateNavigationActions();
         updateCurrentViewUi();
         return;
     }
 
-    const ViewStatePaths previousViewPaths = captureViewStatePaths(m_treemapWidget->currentViewState());
-    std::vector<ViewStatePaths> previousHistoryPaths;
-    previousHistoryPaths.reserve(m_history.size());
-    for (const TreemapWidget::ViewState& state : m_history) {
-        previousHistoryPaths.push_back(captureViewStatePaths(state));
+    const TreemapWidget::ViewState previousView = m_treemapWidget->currentViewState();
+
+    std::vector<FileNode*> vectorChildren;
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual()) {
+            vectorChildren.push_back(child);
+        }
     }
 
     if (visible) {
         for (FileNode* freeNode : m_freeSpaceNodes) {
-            children.push_back(freeNode);
+            vectorChildren.push_back(freeNode);
         }
-        std::sort(children.begin(), children.end(),
+        std::sort(vectorChildren.begin(), vectorChildren.end(),
                   [](const FileNode* a, const FileNode* b) {
                       return a->size > b->size;
                   });
-        placeFreeSpaceNodes(m_treemapWidget->currentNode());
     } else {
-        children.erase(std::remove_if(children.begin(), children.end(),
-                                      [](FileNode* c) { return c && c->isVirtual; }),
-                       children.end());
+        // Virtual nodes already skipped in collection loop above
         // Also remove mount-point node if currently active.
         if (m_mountPointFreeNode && m_mountPointFreeNode->parent) {
-            auto& ch = m_mountPointFreeNode->parent->children;
-            ch.erase(std::remove(ch.begin(), ch.end(), m_mountPointFreeNode), ch.end());
+            FileNode* p = m_mountPointFreeNode->parent;
+            std::vector<FileNode*> pChildren;
+            for (FileNode* c = p->firstChild; c; c = c->nextSibling) {
+                if (c != m_mountPointFreeNode) {
+                    pChildren.push_back(c);
+                }
+            }
+            if (!pChildren.empty()) {
+                p->firstChild = pChildren[0];
+                for (size_t i = 0; i < pChildren.size() - 1; ++i) {
+                    pChildren[i]->nextSibling = pChildren[i + 1];
+                }
+                pChildren.back()->nextSibling = nullptr;
+            } else {
+                p->firstChild = nullptr;
+            }
             m_mountPointFreeNode->parent = nullptr;
         }
     }
 
-    m_history.clear();
-    m_history.reserve(previousHistoryPaths.size());
-    for (const ViewStatePaths& state : previousHistoryPaths) {
-        TreemapWidget::ViewState remapped = remapViewStatePaths(state, m_scanResult.root);
-        if (!remapped.node) {
-            continue;
+    if (!vectorChildren.empty()) {
+        root->firstChild = vectorChildren[0];
+        for (size_t i = 0; i < vectorChildren.size() - 1; ++i) {
+            vectorChildren[i]->nextSibling = vectorChildren[i + 1];
         }
-        if (m_history.empty() || !sameViewState(m_history.back(), remapped)) {
-            m_history.push_back(remapped);
-        }
+        vectorChildren.back()->nextSibling = nullptr;
+    } else {
+        root->firstChild = nullptr;
     }
 
-    const TreemapWidget::ViewState remappedView = remapViewStatePaths(previousViewPaths, m_scanResult.root);
-    m_treemapWidget->setRoot(m_scanResult.root, m_scanResult.arena, false, false);
-    m_treemapWidget->restoreViewStateImmediate(remappedView);
+    if (visible) {
+        placeFreeSpaceNodes(m_treemapWidget->currentNode());
+    }
+
+    m_treemapWidget->setRoot(m_scanResult.snapshot, false, false);
+    m_treemapWidget->restoreViewStateImmediate(previousView);
+
     rebuildFilesystemWatchers();
     updateDirectoryTreePanel();
-    refreshTypeLegendAsync(m_scanResult.root);
+    refreshTypeLegendAsync(root);
     updateCurrentViewUi();
     updateNavigationActions();
 }
@@ -3902,8 +4081,9 @@ void MainWindow::onNodeHovered(FileNode* node)
         return;
     }
 
-    QString sizeStr = QLocale::system().formattedDataSize(node->size);
-    if (node->isVirtual) {
+    const qint64 sizeBytes = node->isVirtual() ? node->size : node->displaySize;
+    QString sizeStr = QLocale::system().formattedDataSize(sizeBytes);
+    if (node->isVirtual()) {
         statusBar()->showMessage(tr("Free Space: %1").arg(sizeStr));
     } else {
         statusBar()->showMessage(tr("%1  (%2)").arg(statusBarDisplayPath(nodePath(node)), sizeStr));
@@ -4214,7 +4394,7 @@ void MainWindow::setSearchBusy(bool busy)
 {
     const bool landingVisible = m_centralStack && m_landingPage
         && m_centralStack->currentWidget() == m_landingPage;
-    const bool blockSearchControls = landingVisible || (m_scanInProgress && !m_backgroundRefreshInProgress);
+    const bool blockSearchControls = landingVisible || isTreeInteractionBlocked();
     if (m_filterPanel) {
         m_filterPanel->setEnabled(!blockSearchControls);
     }
@@ -4230,6 +4410,9 @@ void MainWindow::setSearchBusy(bool busy)
 void MainWindow::finalizeIncrementalRefresh(IncrementalRefreshResult refreshed)
 {
     const QString refreshPath = m_activeRefreshPath;
+    const TreemapWidget::ViewState currentView = m_treemapWidget
+        ? m_treemapWidget->currentViewState()
+        : TreemapWidget::ViewState{};
 
     if (refreshed.rootReplaced) {
         if (m_directoryTree) m_directoryTree->clear();
@@ -4238,39 +4421,33 @@ void MainWindow::finalizeIncrementalRefresh(IncrementalRefreshResult refreshed)
     } else {
         if (!spliceRefreshedSubtree(m_scanResult, refreshPath, std::move(refreshed.refreshed))) {
             setRefreshBusy(false);
+            setSearchBusy(false);
+            updateNavigationActions();
             return;
         }
     }
 
-    restoreHistoryFromPaths(m_preRefreshHistoryPaths, m_scanResult.root);
-
-    const TreemapWidget::ViewState remappedView = remapViewStatePaths(m_preRefreshViewPaths, m_scanResult.root);
     if (refreshed.rootReplaced) {
         // Pass animateLayout=false: m_current still points into the just-freed old arena here,
         // and setRoot would dereference it to capture a "previous frame" pixmap before
         // updating m_current — that would be a use-after-free.
-        m_treemapWidget->setRoot(m_scanResult.root, m_scanResult.arena, false, false);
+        m_treemapWidget->setRoot(m_scanResult.snapshot, false, false);
     } else {
+        m_treemapWidget->updateSnapshot(m_scanResult.snapshot);
         m_treemapWidget->notifyTreeChanged();
     }
-    if (remappedView.node) {
-        m_treemapWidget->restoreViewStateImmediate(remappedView);
-    } else if (!refreshed.rootReplaced) {
-        // The viewed node no longer exists in the refreshed subtree (e.g. it was deleted).
-        // setRoot already reset m_current for the rootReplaced path; for subtree-only
-        // replacements we need to fall back explicitly so m_current is not left pointing
-        // at the orphaned old node.
-        TreemapWidget::ViewState fallback;
-        fallback.node = m_scanResult.root;
-        m_treemapWidget->restoreViewStateImmediate(fallback);
-    }
+
+    m_treemapWidget->restoreViewStateImmediate(currentView);
+
     refreshTypeLegendAsync(m_treemapWidget->currentNode());
     scheduleTreeMaintenance();
     m_dirtyPaths.insert(refreshPath);
     setRefreshBusy(false);
+    setSearchBusy(false);
     updateDirectoryTreePanel();
     updateCompletedStatusLabels();
     updateCurrentViewUi();
     statusBar()->showMessage(tr("Refreshed: %1").arg(statusBarDisplayPath(refreshPath)), 3000);
     updateNavigationActions();
+    syncFilesystemWatchControllerState();
 }

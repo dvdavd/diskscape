@@ -619,8 +619,8 @@ void collectVirtualFileTypeSummaries(const FileNode* root, QHash<uint64_t, FileT
         return;
     }
 
-    for (const FileNode* child : root->children) {
-        if (!child || !child->isVirtual) {
+    for (const FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual()) {
             continue;
         }
         FileTypeSummary& summary = summaries[kFreeSpaceKey];
@@ -634,18 +634,19 @@ void collectVirtualFileTypeSummaries(const FileNode* root, QHash<uint64_t, FileT
 void collectSubtreeFileTypeSummaries(const FileNode* node, QHash<uint64_t, FileTypeSummary>& summaries,
                                      const std::vector<bool>& searchReach)
 {
-    if (!node || node->isVirtual) {
+    if (!node || node->isVirtual()) {
         return;
     }
 
-    if (!node->isDirectory) {
+    if (!node->isDirectory()) {
         const bool reachable = searchReach.empty()
             || (node->id < searchReach.size() && searchReach[node->id]);
         if (!reachable) {
             return;
         }
 
-        const uint64_t key = node->extKey ? node->extKey : kNoExtKey;
+        const uint64_t ext = ColorUtils::packFileExt(node->name);
+        const uint64_t key = ext ? ext : kNoExtKey;
         FileTypeSummary& summary = summaries[key];
         if (summary.label.isEmpty()) {
             summary.label = (key == kNoExtKey)
@@ -656,23 +657,31 @@ void collectSubtreeFileTypeSummaries(const FileNode* node, QHash<uint64_t, FileT
         return;
     }
 
-    for (const FileNode* child : node->children) {
+    for (const FileNode* child = node->firstChild; child; child = child->nextSibling) {
         collectSubtreeFileTypeSummaries(child, summaries, searchReach);
     }
 }
 
-std::vector<FileNode*> collectAndMaybeStripVirtualNodes(std::vector<FileNode*>& children,
-                                                         bool show)
+std::vector<FileNode*> collectAndMaybeStripVirtualNodes(FileNode* parent, bool show)
 {
     std::vector<FileNode*> freeSpaceNodes;
-    for (FileNode* child : children) {
-        if (child && child->isVirtual)
-            freeSpaceNodes.push_back(child);
+    if (!parent) {
+        return freeSpaceNodes;
     }
-    if (!freeSpaceNodes.empty() && !show) {
-        children.erase(std::remove_if(children.begin(), children.end(),
-                                      [](FileNode* c) { return c && c->isVirtual; }),
-                       children.end());
+
+    FileNode** pPrev = &parent->firstChild;
+    FileNode* child = parent->firstChild;
+    while (child) {
+        if (child->isVirtual()) {
+            freeSpaceNodes.push_back(child);
+            if (!show) {
+                *pPrev = child->nextSibling;
+                child = *pPrev;
+                continue;
+            }
+        }
+        pPrev = &child->nextSibling;
+        child = child->nextSibling;
     }
     return freeSpaceNodes;
 }
@@ -687,7 +696,7 @@ void appendUniquePath(QStringList& paths, const QString& path)
 
 void collectDescendantDirectoryPaths(FileNode* node, int remainingDepth, QStringList& paths, int maxPaths)
 {
-    if (!node || remainingDepth < 0 || !node->isDirectory || node->isVirtual || paths.size() >= maxPaths) {
+    if (!node || remainingDepth < 0 || !node->isDirectory() || node->isVirtual() || paths.size() >= maxPaths) {
         return;
     }
 
@@ -696,7 +705,7 @@ void collectDescendantDirectoryPaths(FileNode* node, int remainingDepth, QString
         return;
     }
 
-    for (FileNode* child : node->children) {
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
         collectDescendantDirectoryPaths(child, remainingDepth - 1, paths, maxPaths);
     }
 }
@@ -731,40 +740,38 @@ void injectFreeSpaceNodeIfNeeded(ScanResult& scanResult, const QString& currentP
         if (!fs.isLocal && settings.hideNonLocalFreeSpace)
             continue;
 
-        const bool isPrimary = (fs.canonicalMountRoot == canonicalCurrentPath);
-        const QString label = isPrimary
-            ? QCoreApplication::translate("ColorUtils", "Free Space")
-            : QCoreApplication::translate("ColorUtils", "Free Space (%1)").arg(fs.displayMountRoot);
-
         FileNode* freeNode = scanResult.arena->alloc();
-        freeNode->name = label;
+        // Store path in name since absolutePath is gone.
+        // Legend label is hardcoded to "Free Space" in collectVirtualFileTypeSummaries.
+        freeNode->name = fs.canonicalMountRoot;
         freeNode->size = fs.freeBytes;
-        freeNode->isVirtual = true;
-        freeNode->isDirectory = false;
+        freeNode->displaySize = fs.freeBytes;
+        freeNode->setIsVirtual(true);
+        freeNode->setIsDirectory(false);
         freeNode->color = settings.freeSpaceColor.rgba();
-        // absolutePath stores the canonical mount root so navigation can redistribute this node
-        freeNode->absolutePath = fs.canonicalMountRoot;
         freeNodes.push_back({freeNode, fs.displayMountRoot});
     }
 
     if (freeNodes.size() == 1) {
-        freeNodes[0].node->parent = scanResult.root;
-        scanResult.root->children.push_back(freeNodes[0].node);
+        freeNodes[0].node->name = QCoreApplication::translate("ColorUtils", "Free Space");
+        appendChild(scanResult.root, freeNodes[0].node);
+        scanResult.root->size += freeNodes[0].node->size;
     } else if (freeNodes.size() > 1) {
         FileNode* consolidated = scanResult.arena->alloc();
         consolidated->name = QCoreApplication::translate("ColorUtils", "Free Space");
-        consolidated->isVirtual = true;
-        consolidated->isDirectory = true;
+        consolidated->setIsVirtual(true);
+        consolidated->setIsDirectory(true);
         consolidated->color = settings.freeSpaceColor.rgba();
-        consolidated->parent = scanResult.root;
         consolidated->size = 0;
+        consolidated->displaySize = 0;
         for (const auto& item : freeNodes) {
-            item.node->parent = consolidated;
-            item.node->name = item.displayRoot;
-            consolidated->children.push_back(item.node);
+            item.node->name = item.displayRoot; // For sub-nodes of consolidated, use display root
+            appendChild(consolidated, item.node);
             consolidated->size += item.node->size;
+            consolidated->displaySize += item.node->displaySize;
         }
-        scanResult.root->children.push_back(consolidated);
+        appendChild(scanResult.root, consolidated);
+        scanResult.root->size += consolidated->size;
     }
 }
 
@@ -788,6 +795,31 @@ QList<FileTypeSummary> collectAndSortFileSummaries(FileNode* root, const std::ve
                   return a.label < b.label;
               });
     return ordered;
+}
+
+void applyStableItemTextBrush(QTreeWidget* tree, QTreeWidgetItem* item)
+{
+    if (!tree || !item) {
+        return;
+    }
+
+    const QBrush textBrush = tree->palette().brush(tree->isEnabled() ? QPalette::Active
+                                                                     : QPalette::Disabled,
+                                                   QPalette::Text);
+    for (int column = 0; column < tree->columnCount(); ++column) {
+        item->setForeground(column, textBrush);
+    }
+}
+
+void refreshTreeItemTextBrushes(QTreeWidget* tree, QTreeWidgetItem* item)
+{
+    if (!tree || !item) {
+        return;
+    }
+    applyStableItemTextBrush(tree, item);
+    for (int i = 0; i < item->childCount(); ++i) {
+        refreshTreeItemTextBrushes(tree, item->child(i));
+    }
 }
 
 void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
@@ -815,9 +847,6 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
     int totalCount = 0;
 
     const QLocale locale = QLocale::system();
-    const QBrush textBrush = tree->palette().brush(tree->isEnabled() ? QPalette::Active
-                                                                     : QPalette::Disabled,
-                                                   QPalette::Text);
     QList<QTreeWidgetItem*> items;
     items.reserve(ordered.size());
     QTreeWidgetItem* selectedItem = nullptr;
@@ -835,9 +864,7 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
         item->setData(1, kLegendSortValueRole, summary.totalSize);
         item->setText(2, locale.toString(summary.count));
         item->setData(2, kLegendSortValueRole, summary.count);
-        item->setForeground(0, textBrush);
-        item->setForeground(1, textBrush);
-        item->setForeground(2, textBrush);
+        applyStableItemTextBrush(tree, item);
         item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
         if (summary.label == highlightedType) {
@@ -878,13 +905,13 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
 
 bool sameViewState(const TreemapWidget::ViewState& a, const TreemapWidget::ViewState& b)
 {
-    return a.node == b.node
+    return a.nodeKey == b.nodeKey
         && std::abs(a.cameraScale - b.cameraScale) < 0.0001
         && std::abs(a.cameraOrigin.x() - b.cameraOrigin.x()) < 0.01
         && std::abs(a.cameraOrigin.y() - b.cameraOrigin.y()) < 0.01
         && a.semanticDepth == b.semanticDepth
-        && a.semanticFocus == b.semanticFocus
-        && a.semanticLiveRoot == b.semanticLiveRoot
+        && a.semanticFocusKey == b.semanticFocusKey
+        && a.semanticLiveRootKey == b.semanticLiveRootKey
         && std::abs(a.currentRootLayoutAspectRatio - b.currentRootLayoutAspectRatio) < 0.0001;
 }
 
@@ -893,13 +920,13 @@ bool isOverviewState(const TreemapWidget::ViewState& state)
     return std::abs(state.cameraScale - 1.0) < 0.0001
         && std::abs(state.cameraOrigin.x()) < 0.01
         && std::abs(state.cameraOrigin.y()) < 0.01
-        && state.semanticFocus == nullptr
-        && state.semanticLiveRoot == nullptr;
+        && !state.semanticFocusKey.isValid()
+        && !state.semanticLiveRootKey.isValid();
 }
 
 FileNode* findNodeByPath(FileNode* node, const QString& targetPath)
 {
-    if (!node || targetPath.isEmpty() || node->isVirtual) {
+    if (!node || targetPath.isEmpty() || node->isVirtual()) {
         return nullptr;
     }
 
@@ -909,7 +936,7 @@ FileNode* findNodeByPath(FileNode* node, const QString& targetPath)
         return node;
     }
 
-    if (!node->isDirectory) {
+    if (!node->isDirectory()) {
         return nullptr;
     }
 
@@ -917,7 +944,7 @@ FileNode* findNodeByPath(FileNode* node, const QString& targetPath)
         return nullptr;
     }
 
-    for (FileNode* child : node->children) {
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
         if (FileNode* match = findNodeByPath(child, targetPath)) {
             return match;
         }
@@ -926,14 +953,24 @@ FileNode* findNodeByPath(FileNode* node, const QString& targetPath)
     return nullptr;
 }
 
+FileNode* findNodeByPath(const std::shared_ptr<TreemapSnapshot>& snapshot, const QString& targetPath)
+{
+    if (!snapshot || targetPath.isEmpty()) {
+        return nullptr;
+    }
+
+    const QString normalizedTargetPath = normalizedFilesystemPath(targetPath);
+    return snapshot->findNode(normalizedTargetPath);
+}
+
 FileNode* findVirtualFreeSpaceNode(FileNode* root)
 {
     if (!root) {
         return nullptr;
     }
 
-    for (FileNode* child : root->children) {
-        if (child && child->isVirtual) {
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (child && child->isVirtual()) {
             return child;
         }
     }
@@ -962,19 +999,19 @@ bool pathIsWithinRoot(const QString& path, const QString& rootPath)
 
 void collectWatchDirectoryPaths(FileNode* root, FileNode* current, QStringList& paths)
 {
-    if (!root || !root->isDirectory || root->isVirtual) {
+    if (!root || !root->isDirectory() || root->isVirtual()) {
         return;
     }
 
     appendUniquePath(paths, root->computePath());
 
     for (FileNode* node = current; node; node = node->parent) {
-        if (node->isDirectory && !node->isVirtual) {
+        if (node->isDirectory() && !node->isVirtual()) {
             appendUniquePath(paths, node->computePath());
         }
     }
 
-    if (!current || !current->isDirectory || current->isVirtual) {
+    if (!current || !current->isDirectory() || current->isVirtual()) {
         return;
     }
 
@@ -998,41 +1035,30 @@ QString nearestExistingNodePath(FileNode* root, QString path)
     return root ? root->computePath() : QString();
 }
 
-ViewStatePaths captureViewStatePaths(const TreemapWidget::ViewState& state)
+NodeKey nearestExistingNodeKey(const std::shared_ptr<TreemapSnapshot>& snapshot, NodeKey key)
 {
-    ViewStatePaths captured;
-    captured.nodePath = (state.node && !state.node->isVirtual) ? state.node->computePath() : QString();
-    captured.cameraScale = state.cameraScale;
-    captured.cameraOrigin = state.cameraOrigin;
-    captured.semanticDepth = state.semanticDepth;
-    captured.semanticFocusPath = (state.semanticFocus && !state.semanticFocus->isVirtual)
-        ? state.semanticFocus->computePath()
-        : QString();
-    captured.semanticLiveRootPath = (state.semanticLiveRoot && !state.semanticLiveRoot->isVirtual)
-        ? state.semanticLiveRoot->computePath()
-        : QString();
-    captured.currentRootLayoutAspectRatio = state.currentRootLayoutAspectRatio;
-    return captured;
-}
-
-TreemapWidget::ViewState remapViewStatePaths(const ViewStatePaths& original, FileNode* root)
-{
-    TreemapWidget::ViewState remapped;
-    if (!root) {
-        return remapped;
+    if (!snapshot) {
+        return {};
     }
 
-    remapped.cameraScale = original.cameraScale;
-    remapped.cameraOrigin = original.cameraOrigin;
-    remapped.semanticDepth = original.semanticDepth;
-    remapped.currentRootLayoutAspectRatio = original.currentRootLayoutAspectRatio;
-    remapped.node = findNodeByPath(root, nearestExistingNodePath(root, original.nodePath));
-    if (!remapped.node) {
-        remapped.node = root;
+    if (!key.isValid() || key.generation != snapshot->generation) {
+        key.generation = snapshot->generation;
     }
-    remapped.semanticFocus = findNodeByPath(root, original.semanticFocusPath);
-    remapped.semanticLiveRoot = findNodeByPath(root, original.semanticLiveRootPath);
-    return remapped;
+
+    QString path = key.normalizedPath;
+    while (!path.isEmpty()) {
+        if (snapshot->findNode(path)) {
+            return {snapshot->generation, path};
+        }
+
+        const QString parentPath = QFileInfo(path).absolutePath();
+        if (parentPath.isEmpty() || parentPath == path) {
+            break;
+        }
+        path = parentPath;
+    }
+
+    return snapshot->keyFor(snapshot->root);
 }
 
 QString nearestExistingDirectoryOnDisk(QString path)
@@ -1055,7 +1081,7 @@ QString nearestExistingDirectoryOnDisk(QString path)
 
 FileNode* topLevelRefreshNode(FileNode* scanRoot, FileNode* currentNode)
 {
-    if (!scanRoot || !currentNode || currentNode->isVirtual) {
+    if (!scanRoot || !currentNode || currentNode->isVirtual()) {
         return scanRoot;
     }
 
@@ -1129,15 +1155,27 @@ QStringList mountedDevicePaths()
 
 void sortChildrenBySizeRecursive(FileNode* node)
 {
-    if (!node) {
+    if (!node || !node->firstChild) {
         return;
     }
 
-    std::sort(node->children.begin(), node->children.end(),
+    std::vector<FileNode*> children;
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        children.push_back(child);
+    }
+
+    std::sort(children.begin(), children.end(),
               [](const FileNode* a, const FileNode* b) {
-                  return a->size > b->size;
+                  return a->displaySize > b->displaySize;
               });
-    for (FileNode* child : node->children) {
+
+    node->firstChild = children[0];
+    for (size_t i = 0; i < children.size() - 1; ++i) {
+        children[i]->nextSibling = children[i + 1];
+    }
+    children.back()->nextSibling = nullptr;
+
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
         sortChildrenBySizeRecursive(child);
     }
 }
@@ -1146,11 +1184,11 @@ void applyFreeSpaceNodeColor(FileNode* root, const TreemapSettings& settings)
 {
     if (!root)
         return;
-    for (FileNode* child : root->children) {
-        if (child && child->isVirtual) {
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (child->isVirtual()) {
             child->color = settings.freeSpaceColor.rgba();
-            for (FileNode* subChild : child->children) {
-                if (subChild && subChild->isVirtual) {
+            for (FileNode* subChild = child->firstChild; subChild; subChild = subChild->nextSibling) {
+                if (subChild->isVirtual()) {
                     subChild->color = settings.freeSpaceColor.rgba();
                 }
             }
@@ -1160,11 +1198,11 @@ void applyFreeSpaceNodeColor(FileNode* root, const TreemapSettings& settings)
 
 int countFilesRecursive(const FileNode* node)
 {
-    if (!node || node->isVirtual) {
+    if (!node || node->isVirtual()) {
         return 0;
     }
 
-    if (!node->isDirectory) {
+    if (!node->isDirectory()) {
         return 1;
     }
 
@@ -1173,7 +1211,7 @@ int countFilesRecursive(const FileNode* node)
     }
 
     int count = 0;
-    for (const FileNode* child : node->children) {
+    for (const FileNode* child = node->firstChild; child; child = child->nextSibling) {
         count += countFilesRecursive(child);
     }
     return count;
@@ -1181,19 +1219,34 @@ int countFilesRecursive(const FileNode* node)
 
 FileNodeStats fileNodeStats(const FileNode* node)
 {
-    if (!node || node->isVirtual) {
+    if (!node || node->isVirtual()) {
         return {};
     }
 
+    std::function<qint64(const FileNode*)> nonVirtualSize = [&](const FileNode* current) -> qint64 {
+        if (!current || current->isVirtual()) {
+            return 0;
+        }
+        if (!current->isDirectory()) {
+            return current->size;
+        }
+
+        qint64 total = 0;
+        for (const FileNode* child = current->firstChild; child; child = child->nextSibling) {
+            total += nonVirtualSize(child);
+        }
+        return total;
+    };
+
     FileNodeStats stats;
-    if (!node->isDirectory) {
+    if (!node->isDirectory()) {
         stats.fileCount = 1;
-    } else if (node->subtreeFileCount > 0 || node->children.empty()) {
+    } else if (node->subtreeFileCount > 0 || !node->firstChild) {
         stats.fileCount = node->subtreeFileCount;
     } else {
         stats.fileCount = countFilesRecursive(node);
     }
-    stats.totalSize = node->size;
+    stats.totalSize = nonVirtualSize(node);
     return stats;
 }
 
@@ -1220,8 +1273,9 @@ std::vector<FileNode*> prepareRootResultForDisplay(ScanResult& scanResult, const
         sortChildrenBySizeRecursive(scanResult.root);
     }
     applyFreeSpaceNodeColor(scanResult.root, settings);
+    rebuildScanResultSnapshot(scanResult);
 
-    return collectAndMaybeStripVirtualNodes(scanResult.root->children, showFreeSpaceInOverview);
+    return collectAndMaybeStripVirtualNodes(scanResult.root, showFreeSpaceInOverview);
 }
 
 std::vector<FileNode*> reinjectFreeSpaceNodes(ScanResult& scanResult, const QString& currentPath,
@@ -1231,38 +1285,32 @@ std::vector<FileNode*> reinjectFreeSpaceNodes(ScanResult& scanResult, const QStr
     if (!scanResult.root || scanResult.filesystems.isEmpty())
         return {};
 
-    auto& children = scanResult.root->children;
-
     // Strip any existing virtual nodes (in children or previously stashed — we don't care which)
-    children.erase(std::remove_if(children.begin(), children.end(),
-                                  [](FileNode* c) { return c && c->isVirtual; }),
-                   children.end());
+    collectAndMaybeStripVirtualNodes(scanResult.root, false);
 
     // Re-inject under new settings, then re-sort root's direct children only
     // (the rest of the tree is already sorted from the original scan)
     injectFreeSpaceNodeIfNeeded(scanResult, currentPath, settings);
-    std::sort(children.begin(), children.end(),
-              [](const FileNode* a, const FileNode* b) { return a->size > b->size; });
-    applyFreeSpaceNodeColor(scanResult.root, settings);
 
-    return collectAndMaybeStripVirtualNodes(children, showFreeSpaceInOverview);
-}
-
-std::vector<TreemapWidget::ViewState> remapHistoryPaths(const std::vector<ViewStatePaths>& historyPaths,
-                                                        FileNode* root)
-{
-    std::vector<TreemapWidget::ViewState> remappedHistory;
-    remappedHistory.reserve(historyPaths.size());
-    for (const ViewStatePaths& state : historyPaths) {
-        TreemapWidget::ViewState remapped = remapViewStatePaths(state, root);
-        if (!remapped.node) {
-            continue;
+    // Re-sort root's direct children only
+    if (scanResult.root->firstChild) {
+        std::vector<FileNode*> children;
+        for (FileNode* child = scanResult.root->firstChild; child; child = child->nextSibling) {
+            children.push_back(child);
         }
-        if (remappedHistory.empty() || !sameViewState(remappedHistory.back(), remapped)) {
-            remappedHistory.push_back(remapped);
+        std::sort(children.begin(), children.end(),
+                  [](const FileNode* a, const FileNode* b) { return a->size > b->size; });
+        scanResult.root->firstChild = children[0];
+        for (size_t i = 0; i < children.size() - 1; ++i) {
+            children[i]->nextSibling = children[i + 1];
         }
+        children.back()->nextSibling = nullptr;
     }
-    return remappedHistory;
+
+    applyFreeSpaceNodeColor(scanResult.root, settings);
+    rebuildScanResultSnapshot(scanResult);
+
+    return collectAndMaybeStripVirtualNodes(scanResult.root, showFreeSpaceInOverview);
 }
 
 bool sameSubtree(const FileNode* a, const FileNode* b)
@@ -1274,15 +1322,26 @@ bool sameSubtree(const FileNode* a, const FileNode* b)
         return false;
     }
     if (a->name != b->name
-            || a->isDirectory != b->isDirectory
-            || a->isVirtual != b->isVirtual
-            || a->size != b->size
-            || a->children.size() != b->children.size()) {
+            || a->isDirectory() != b->isDirectory()
+            || a->isVirtual() != b->isVirtual()
+            || a->size != b->size) {
         return false;
     }
 
-    for (size_t i = 0; i < a->children.size(); ++i) {
-        if (!sameSubtree(a->children[i], b->children[i])) {
+    // Count children of both before recursing to short-circuit mismatches cheaply.
+    auto childCount = [](const FileNode* n) {
+        int c = 0;
+        for (const FileNode* ch = n->firstChild; ch; ch = ch->nextSibling) ++c;
+        return c;
+    };
+    if (childCount(a) != childCount(b)) {
+        return false;
+    }
+
+    const FileNode* childA = a->firstChild;
+    const FileNode* childB = b->firstChild;
+    for (; childA && childB; childA = childA->nextSibling, childB = childB->nextSibling) {
+        if (!sameSubtree(childA, childB)) {
             return false;
         }
     }
@@ -1290,23 +1349,24 @@ bool sameSubtree(const FileNode* a, const FileNode* b)
     return true;
 }
 
-TreemapWidget::ViewState remapViewStateByPath(const TreemapWidget::ViewState& original, FileNode* root)
-{
-    return remapViewStatePaths(captureViewStatePaths(original), root);
-}
-
 void sanitizeHistoryForRoot(std::vector<TreemapWidget::ViewState>& history, FileNode* root)
 {
+    if (!root) {
+        history.clear();
+        return;
+    }
+
+    auto snapshot = makeTreemapSnapshot(root, nullptr);
+
     std::vector<TreemapWidget::ViewState> sanitized;
     sanitized.reserve(history.size());
 
     for (const TreemapWidget::ViewState& state : history) {
-        TreemapWidget::ViewState remapped = remapViewStateByPath(state, root);
-        if (!remapped.node) {
+        if (!snapshot->findNode(state.nodeKey)) {
             continue;
         }
-        if (sanitized.empty() || !sameViewState(sanitized.back(), remapped)) {
-            sanitized.push_back(remapped);
+        if (sanitized.empty() || !sameViewState(sanitized.back(), state)) {
+            sanitized.push_back(state);
         }
     }
 
@@ -1315,34 +1375,37 @@ void sanitizeHistoryForRoot(std::vector<TreemapWidget::ViewState>& history, File
 
 qint64 pruneDeletedChildren(FileNode* node)
 {
-    if (!node || !node->isDirectory) {
+    if (!node || !node->isDirectory()) {
         return 0;
     }
 
     qint64 removedBytes = 0;
-    auto& children = node->children;
-    auto newEnd = std::remove_if(children.begin(), children.end(), [&](FileNode* child) {
-        if (!child || child->isVirtual) {
-            return false;
-        }
-
-        const QString childPath = child->computePath();
-        if (!QFileInfo::exists(childPath)) {
-            removedBytes += child->size;
-            return true;
-        }
-
-        if (child->isDirectory) {
-            const qint64 nestedRemovedBytes = pruneDeletedChildren(child);
-            if (nestedRemovedBytes > 0) {
-                child->size = std::max<qint64>(0, child->size - nestedRemovedBytes);
-                removedBytes += nestedRemovedBytes;
+    FileNode** pPrev = &node->firstChild;
+    FileNode* child = node->firstChild;
+    while (child) {
+        bool shouldRemove = false;
+        if (!child->isVirtual()) {
+            const QString childPath = child->computePath();
+            if (!QFileInfo::exists(childPath)) {
+                removedBytes += child->size;
+                shouldRemove = true;
+            } else if (child->isDirectory()) {
+                const qint64 nestedRemovedBytes = pruneDeletedChildren(child);
+                if (nestedRemovedBytes > 0) {
+                    child->size = std::max<qint64>(0, child->size - nestedRemovedBytes);
+                    removedBytes += nestedRemovedBytes;
+                }
             }
         }
 
-        return false;
-    });
-    children.erase(newEnd, children.end());
+        if (shouldRemove) {
+            *pPrev = child->nextSibling;
+            child = *pPrev;
+        } else {
+            pPrev = &child->nextSibling;
+            child = child->nextSibling;
+        }
+    }
     return removedBytes;
 }
 
@@ -1379,7 +1442,10 @@ qint64 directorySizeOnDisk(const QString& path)
 
 bool spliceRefreshedSubtree(ScanResult& main, const QString& targetPath, ScanResult refreshed)
 {
-    FileNode* targetNode = findNodeByPath(main.root, targetPath);
+    FileNode* targetNode = findNodeByPath(main.snapshot, targetPath);
+    if (!targetNode) {
+        targetNode = findNodeByPath(main.root, targetPath);
+    }
     if (!targetNode || !targetNode->parent)
         return false;
 
@@ -1388,11 +1454,19 @@ bool spliceRefreshedSubtree(ScanResult& main, const QString& targetPath, ScanRes
     FileNode* parent = targetNode->parent;
     FileNode* newRoot = refreshed.root;
     newRoot->parent = parent;
+    newRoot->name = targetNode->name;
 
-    for (FileNode*& child : parent->children) {
-        if (child == targetNode) {
-            child = newRoot;
-            break;
+    if (parent->firstChild == targetNode) {
+        newRoot->nextSibling = targetNode->nextSibling;
+        parent->firstChild = newRoot;
+    } else {
+        FileNode* prev = parent->firstChild;
+        while (prev && prev->nextSibling != targetNode) {
+            prev = prev->nextSibling;
+        }
+        if (prev) {
+            newRoot->nextSibling = targetNode->nextSibling;
+            prev->nextSibling = newRoot;
         }
     }
 
@@ -1425,5 +1499,6 @@ bool spliceRefreshedSubtree(ScanResult& main, const QString& targetPath, ScanRes
     }
 
     main.arena->merge(std::move(*refreshed.arena));
+    rebuildScanResultSnapshot(main);
     return true;
 }

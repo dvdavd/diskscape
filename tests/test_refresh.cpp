@@ -16,15 +16,16 @@ static ScanResult buildMainTree()
     auto arena = std::make_shared<NodeArena>();
     ScanResult r;
     r.arena = arena;
+    r.rootPath = "/home/user";
 
     FileNode* root = arena->alloc();
-    root->absolutePath = "/home/user";
-    root->isDirectory = true;
+    root->name = r.rootPath;
+    root->setIsDirectory(true);
     root->size = 1000;
 
     FileNode* sub = arena->alloc();
     sub->name = "sub";
-    sub->isDirectory = true;
+    sub->setIsDirectory(true);
     sub->size = 400;
     sub->parent = root;
 
@@ -33,8 +34,29 @@ static ScanResult buildMainTree()
     file->size = 600;
     file->parent = root;
 
-    root->children = {sub, file};
+    root->firstChild = sub;
+    sub->nextSibling = file;
+
     r.root = root;
+    rebuildScanResultSnapshot(r);
+    return r;
+}
+
+static ScanResult buildNestedTree()
+{
+    ScanResult r = buildMainTree();
+    auto* sub = r.root->firstChild;
+    FileNode* nested = r.arena->alloc();
+    nested->name = "nested";
+    nested->setIsDirectory(true);
+    nested->size = 250;
+    nested->parent = sub;
+    nested->nextSibling = sub->firstChild;
+    sub->firstChild = nested;
+    sub->subtreeFileCount = 1;
+    sub->size = 250;
+    r.root->size = 850;
+    rebuildScanResultSnapshot(r);
     return r;
 }
 
@@ -45,21 +67,22 @@ private slots:
     void splice_replacesChildInParent()
     {
         ScanResult main = buildMainTree();
-        FileNode* oldSub = main.root->children[0]; // the "sub" node
+        FileNode* oldSub = main.root->firstChild; // the "sub" node
 
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshArena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
         newSub->size = 800;
         refreshed.root = newSub;
 
         QVERIFY(spliceRefreshedSubtree(main, "/home/user/sub", std::move(refreshed)));
 
-        QCOMPARE(main.root->children[0], newSub);
-        QVERIFY(main.root->children[0] != oldSub);
+        QCOMPARE(main.root->firstChild, newSub);
+        QVERIFY(main.root->firstChild != oldSub);
     }
 
     void splice_setsParentPointer()
@@ -69,9 +92,10 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshArena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
         newSub->size = 400;
         refreshed.root = newSub;
 
@@ -88,9 +112,10 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshArena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
         newSub->size = 800;
         refreshed.root = newSub;
 
@@ -107,9 +132,10 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshArena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
         newSub->size = 100;
         refreshed.root = newSub;
 
@@ -128,9 +154,9 @@ private slots:
         for (int i = 0; i < 5; ++i) refreshArena->alloc();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshed.arena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->setIsDirectory(true);
         newSub->size = 400;
         refreshed.root = newSub;
 
@@ -146,9 +172,9 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/nonexistent";
         FileNode* newNode = refreshArena->alloc();
-        newNode->absolutePath = "/home/user/nonexistent";
-        newNode->isDirectory = true;
+        newNode->setIsDirectory(true);
         newNode->size = 100;
         refreshed.root = newNode;
 
@@ -163,9 +189,9 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user";
         FileNode* newRoot = refreshArena->alloc();
-        newRoot->absolutePath = "/home/user";
-        newRoot->isDirectory = true;
+        newRoot->setIsDirectory(true);
         newRoot->size = 2000;
         refreshed.root = newRoot;
 
@@ -187,9 +213,10 @@ private slots:
         auto refreshArena = std::make_shared<NodeArena>();
         ScanResult refreshed;
         refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
         FileNode* newSub = refreshArena->alloc();
-        newSub->absolutePath = "/home/user/sub";
-        newSub->isDirectory = true;
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
         newSub->size = 400;
         refreshed.root = newSub;
         refreshed.filesystems = {
@@ -202,6 +229,72 @@ private slots:
         QCOMPARE(main.filesystems.size(), 3);
         QCOMPARE(main.freeBytes, qint64(400));
         QCOMPARE(main.totalBytes, qint64(1614));
+    }
+
+    void snapshot_lookup_resolvesByPath()
+    {
+        ScanResult main = buildMainTree();
+        QVERIFY(main.snapshot);
+        QCOMPARE(findNodeByPath(main.snapshot, "/home/user"), main.root);
+        QCOMPARE(findNodeByPath(main.snapshot, "/home/user/sub"), main.root->firstChild);
+        QCOMPARE(findNodeByPath(main.snapshot, "/home/user/missing"), nullptr);
+    }
+
+    void viewState_remap_usesSnapshotIndexAfterSubtreeRefresh()
+    {
+        ScanResult main = buildMainTree();
+        FileNode* oldSub = main.root->firstChild;
+
+        TreemapWidget::ViewState view;
+        view.nodeKey = main.snapshot->keyFor(oldSub);
+        view.cameraScale = 2.0;
+
+        auto refreshArena = std::make_shared<NodeArena>();
+        ScanResult refreshed;
+        refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
+        FileNode* newSub = refreshArena->alloc();
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
+        newSub->size = 800;
+        refreshed.root = newSub;
+
+        QVERIFY(spliceRefreshedSubtree(main, "/home/user/sub", std::move(refreshed)));
+        rebuildScanResultSnapshot(main);
+        QVERIFY(main.snapshot);
+
+        FileNode* resolved = main.snapshot->findNode(view.nodeKey);
+        QCOMPARE(resolved, newSub);
+        QCOMPARE(view.cameraScale, 2.0);
+    }
+
+    void viewState_remap_fallsBackToNearestExistingAncestor()
+    {
+        ScanResult main = buildNestedTree();
+        FileNode* sub = main.root->firstChild;
+        FileNode* nested = sub->firstChild;
+
+        TreemapWidget::ViewState view;
+        view.nodeKey = main.snapshot->keyFor(nested);
+
+        auto refreshArena = std::make_shared<NodeArena>();
+        ScanResult refreshed;
+        refreshed.arena = refreshArena;
+        refreshed.rootPath = "/home/user/sub";
+        FileNode* newSub = refreshArena->alloc();
+        newSub->name = "sub";
+        newSub->setIsDirectory(true);
+        newSub->size = 100;
+        refreshed.root = newSub;
+
+        QVERIFY(spliceRefreshedSubtree(main, "/home/user/sub", std::move(refreshed)));
+        rebuildScanResultSnapshot(main);
+
+        FileNode* resolved = main.snapshot->findNode(view.nodeKey);
+        if (!resolved) {
+            resolved = main.snapshot->findNode(nearestExistingNodeKey(main.snapshot, view.nodeKey));
+        }
+        QCOMPARE(resolved, newSub);
     }
 };
 

@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QStringList>
 #include <QTextStream>
 
@@ -25,13 +26,13 @@ void collectTreeStats(const FileNode* node, qint64 depth, TreeStats& stats)
 
     ++stats.nodes;
     stats.maxDepth = std::max(stats.maxDepth, depth);
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         ++stats.directories;
     } else {
         ++stats.files;
     }
 
-    for (const FileNode* child : node->children) {
+    for (const FileNode* child = node->firstChild; child; child = child->nextSibling) {
         collectTreeStats(child, depth + 1, stats);
     }
 }
@@ -41,15 +42,11 @@ QString formatMs(qint64 value)
     return QString::number(static_cast<double>(value) / 1000.0, 'f', 3);
 }
 
-QString formatNsAsMs(qint64 value)
-{
-    return QString::number(static_cast<double>(value) / 1000000.0, 'f', 3);
-}
-
 } // namespace
 
 int main(int argc, char* argv[])
 {
+    QGuiApplication app(argc, argv);
     QTextStream out(stdout);
     QTextStream err(stderr);
 
@@ -59,21 +56,16 @@ int main(int argc, char* argv[])
         args.push_back(QString::fromLocal8Bit(argv[i]));
     }
     if (args.size() < 2) {
-        err << "Usage: scanner_bench <path> [--live-preview] [--iterations N] [--partition-depth N] [--no-activity-tracking]\n";
+        err << "Usage: scanner_bench <path> [--iterations N] [--partition-depth N] [--no-activity-tracking]\n";
         return 1;
     }
 
     const QString path = QFileInfo(args.at(1)).absoluteFilePath();
-    bool livePreview = false;
     bool activityTracking = true;
     int iterations = 1;
     int partitionDepth = TreemapSettings::defaults().parallelPartitionDepth;
     for (int i = 2; i < args.size(); ++i) {
         const QString& arg = args.at(i);
-        if (arg == QLatin1String("--live-preview")) {
-            livePreview = true;
-            continue;
-        }
         if (arg == QLatin1String("--iterations")) {
             if (i + 1 >= args.size()) {
                 err << "Missing value for --iterations\n";
@@ -110,37 +102,19 @@ int main(int argc, char* argv[])
     }
 
     TreemapSettings settings = TreemapSettings::defaults();
-    settings.liveScanPreview = livePreview;
     settings.enableScanActivityTracking = activityTracking;
     settings.parallelPartitionDepth = partitionDepth;
     settings.sanitize();
 
     qint64 measuredElapsedSumMs = 0;
     qint64 measuredIterations = 0;
-    qint64 previewCount = 0;
-    qint64 previewNodes = 0;
-    qint64 previewTotalNs = 0;
-    ScanProfile aggregateProfile;
     TreeStats stats;
     qint64 totalBytes = 0;
 
     for (int iteration = 0; iteration < iterations; ++iteration) {
-        Scanner::ProgressCallback progressCallback;
-        if (livePreview) {
-            progressCallback = [&](ScanResult snapshot) {
-                QElapsedTimer timer;
-                timer.start();
-                TreeStats previewStats;
-                collectTreeStats(snapshot.root, 0, previewStats);
-                ++previewCount;
-                previewNodes += previewStats.nodes;
-                previewTotalNs += timer.nsecsElapsed();
-            };
-        }
-
         QElapsedTimer totalTimer;
         totalTimer.start();
-        ScanResult result = Scanner::scan(path, settings, progressCallback);
+        ScanResult result = Scanner::scan(path, settings);
         const qint64 elapsedMs = totalTimer.elapsed();
         out << "iteration_" << (iteration + 1) << "_s: " << formatMs(elapsedMs) << '\n';
         if (iteration > 0 || iterations == 1) {
@@ -153,15 +127,6 @@ int main(int argc, char* argv[])
             return 2;
         }
 
-        if (result.profile) {
-            aggregateProfile.progressCalls += result.profile->progressCalls;
-            aggregateProfile.progressSnapshots += result.profile->progressSnapshots;
-            aggregateProfile.progressThrottleSkips += result.profile->progressThrottleSkips;
-            aggregateProfile.progressCloneNs += result.profile->progressCloneNs;
-            aggregateProfile.progressCallbackNs += result.profile->progressCallbackNs;
-            aggregateProfile.mergeNs += result.profile->mergeNs;
-        }
-
         if (iteration == iterations - 1) {
             collectTreeStats(result.root, 0, stats);
             totalBytes = result.root->size;
@@ -169,7 +134,6 @@ int main(int argc, char* argv[])
     }
 
     out << "path: " << QDir::toNativeSeparators(path) << '\n';
-    out << "live_preview: " << (livePreview ? "on" : "off") << '\n';
     out << "iterations: " << iterations << '\n';
     out << "warmup_iterations: " << (iterations > 1 ? 1 : 0) << '\n';
     out << "measured_iterations: " << measuredIterations << '\n';
@@ -181,34 +145,6 @@ int main(int argc, char* argv[])
     out << "files: " << stats.files << '\n';
     out << "max_depth: " << stats.maxDepth << '\n';
     out << "bytes: " << totalBytes << '\n';
-    out << "preview_count: " << previewCount << '\n';
-    out << "preview_nodes_total: " << previewNodes << '\n';
-    out << "preview_callback_total_ms: " << formatNsAsMs(previewTotalNs) << '\n';
-    out << "emit_progress_calls: " << aggregateProfile.progressCalls << '\n';
-    out << "emit_progress_snapshots: " << aggregateProfile.progressSnapshots << '\n';
-    out << "emit_progress_throttle_skips: " << aggregateProfile.progressThrottleSkips << '\n';
-    out << "emit_progress_clone_total_ms: " << formatNsAsMs(aggregateProfile.progressCloneNs) << '\n';
-    out << "emit_progress_callback_total_ms: " << formatNsAsMs(aggregateProfile.progressCallbackNs) << '\n';
-    out << "merge_total_ms: " << formatNsAsMs(aggregateProfile.mergeNs) << '\n';
-    if (previewCount > 0) {
-        out << "preview_callback_avg_ms: "
-            << QString::number((static_cast<double>(previewTotalNs) / 1000000.0)
-                                   / static_cast<double>(previewCount),
-                               'f', 3)
-            << '\n';
-    }
-    if (aggregateProfile.progressSnapshots > 0) {
-        out << "emit_progress_clone_avg_ms: "
-            << QString::number((static_cast<double>(aggregateProfile.progressCloneNs) / 1000000.0)
-                                   / static_cast<double>(aggregateProfile.progressSnapshots),
-                               'f', 3)
-            << '\n';
-        out << "emit_progress_callback_avg_ms: "
-            << QString::number((static_cast<double>(aggregateProfile.progressCallbackNs) / 1000000.0)
-                                   / static_cast<double>(aggregateProfile.progressSnapshots),
-                               'f', 3)
-            << '\n';
-    }
 
     return 0;
 }

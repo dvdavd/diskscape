@@ -55,7 +55,8 @@ bool canPaintChildren(const QRectF& bounds, int depth, int maxVisibleDepth,
 void squarifiedLayout(const std::vector<FileNode*>& children,
                       const QRectF& rect,
                       qint64 totalSize,
-                      std::vector<std::pair<FileNode*, QRectF>>& result);
+                      std::vector<std::pair<FileNode*, QRectF>>& result,
+                      bool useApparentSizes = false);
 QPointF snapCameraOriginToPixelGrid(const QPointF& origin, qreal scale, qreal pixelScale = 1.0);
 QColor contrastingTextColor(const QColor& background);
 QColor contrastingBorderColor(const QColor& background);

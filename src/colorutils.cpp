@@ -495,9 +495,9 @@ static void assignColorsRecurse(FileNode* node, int depth, float branchHue,
         return;
     }
 
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         float effectiveHue = branchHue;
-        const FolderMark mark = static_cast<FolderMark>(node->colorMark);
+        const FolderMark mark = static_cast<FolderMark>(node->colorMark());
         bool hueChanged = false;
         if (mark != FolderMark::None) {
             switch (mark) {
@@ -523,8 +523,8 @@ static void assignColorsRecurse(FileNode* node, int depth, float branchHue,
         node->color = fileColorFast(node->name, fileColorLookup, settings).rgba();
     }
 
-    for (FileNode* child : node->children) {
-        if (!child->isVirtual) {
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual()) {
             assignColorsRecurse(child, depth + 1, branchHue, fileColorLookup, settings, inMarkedBranch);
         }
     }
@@ -550,7 +550,7 @@ static void assignColorsWithLookup(FileNode* root, const QHash<uint64_t, QRgb>& 
     }
 
     float rootHue = initialFolderBranchHue(root, settings);
-    const FolderMark rootMark = static_cast<FolderMark>(root->colorMark);
+    const FolderMark rootMark = static_cast<FolderMark>(root->colorMark());
     bool rootHueChanged = false;
     if (rootMark != FolderMark::None) {
         switch (rootMark) {
@@ -568,8 +568,8 @@ static void assignColorsWithLookup(FileNode* root, const QHash<uint64_t, QRgb>& 
         ? folderColorForMark(0, rootHue, settings).rgba()
         : folderColor(0, rootHue, settings).rgba();
 
-    for (FileNode* child : root->children) {
-        if (!child->isVirtual) {
+    for (FileNode* child = root->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual()) {
             assignColorsRecurse(child, 1, topLevelFolderBranchHue(child->name, settings),
                                 fileColorLookup, settings, rootHueChanged);
         }
@@ -603,10 +603,10 @@ QString fileTypeLabelForNode(const FileNode* node)
     if (!node) {
         return {};
     }
-    if (node->isVirtual) {
+    if (node->isVirtual()) {
         return QCoreApplication::translate("ColorUtils", "Free Space");
     }
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         return {};
     }
     return fileTypeLabelForName(node->name);

@@ -139,12 +139,17 @@ struct TreemapSettings {
     int cameraDurationMs = 140;
     bool fastWheelZoom = false;
     bool trackpadScrollPans = false;
+    bool doubleClickToOpen = false;
     double cameraMaxScale = 256.0;
-    int parallelPartitionDepth = 3;
+    int parallelPartitionDepth = 4;
     int maxSemanticDepth = 20;
     double edgeFocusInsetRatio = 0.18;
     double tileAspectBias = 0.0;
-    bool liveScanPreview = true;
+    enum ScanPreviewMode {
+        ScanPreviewNone = 0,
+        ScanPreviewFast = 1,
+    };
+    int scanPreviewMode = ScanPreviewFast;
     bool simpleTooltips = false;
     bool enableScanActivityTracking = true;
     bool hideNonLocalFreeSpace = false;

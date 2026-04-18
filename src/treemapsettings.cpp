@@ -323,6 +323,7 @@ void TreemapSettings::applyDefaults(TreemapSettings& settings)
     settings.lightModeColorThemeId = TreemapColorTheme::builtInLightId();
     settings.darkModeColorThemeId = TreemapColorTheme::builtInDarkId();
     settings.followSystemColorTheme = true;
+    settings.doubleClickToOpen = false;
     settings.limitToSameFilesystem = false;
 }
 
@@ -541,6 +542,9 @@ void TreemapSettings::sanitize()
     maxSemanticDepth = qMax(baseVisibleDepth, maxSemanticDepth);
     edgeFocusInsetRatio = qBound(0.0, edgeFocusInsetRatio, 0.49);
     tileAspectBias = qBound(-1.0, tileAspectBias, 1.0);
+    scanPreviewMode = qBound(static_cast<int>(ScanPreviewNone),
+                             scanPreviewMode,
+                             static_cast<int>(ScanPreviewFast));
     ensureColorThemes();
     applyActiveColorTheme();
 
@@ -638,15 +642,23 @@ TreemapSettings TreemapSettings::load(QSettings& store)
     settings.wheelZoomMaxScale = store.value("treemap/wheelZoomMaxScale", settings.wheelZoomMaxScale).toDouble();
     settings.fastWheelZoom = store.value("treemap/fastWheelZoom", settings.fastWheelZoom).toBool();
     settings.trackpadScrollPans = store.value("treemap/trackpadScrollPans", settings.trackpadScrollPans).toBool();
+    settings.doubleClickToOpen = store.value("treemap/doubleClickToOpen", settings.doubleClickToOpen).toBool();
     settings.cameraDurationMs = store.value("treemap/cameraDurationMs", settings.cameraDurationMs).toInt();
     settings.cameraMaxScale = store.value("treemap/cameraMaxScale", settings.cameraMaxScale).toDouble();
     settings.parallelPartitionDepth = store.value("treemap/parallelPartitionDepth", settings.parallelPartitionDepth).toInt();
     settings.maxSemanticDepth = store.value("treemap/maxSemanticDepth", settings.maxSemanticDepth).toInt();
     settings.edgeFocusInsetRatio = store.value("treemap/edgeFocusInsetRatio", settings.edgeFocusInsetRatio).toDouble();
     settings.tileAspectBias = store.value("treemap/tileAspectBias", settings.tileAspectBias).toDouble();
-    settings.liveScanPreview = store.value("treemap/liveScanPreview", settings.liveScanPreview).toBool();
+    if (store.contains("treemap/scanPreviewMode")) {
+        settings.scanPreviewMode = store.value("treemap/scanPreviewMode",
+            settings.scanPreviewMode).toInt();
+    } else if (store.contains("treemap/liveScanPreview")) {
+        settings.scanPreviewMode = store.value("treemap/liveScanPreview").toBool()
+            ? TreemapSettings::ScanPreviewFast : TreemapSettings::ScanPreviewNone;
+    }
     settings.simpleTooltips = store.value("treemap/simpleTooltips", settings.simpleTooltips).toBool();
     settings.hideNonLocalFreeSpace = store.value("treemap/hideNonLocalFreeSpace", settings.hideNonLocalFreeSpace).toBool();
+
     settings.showThumbnails = store.value("treemap/showThumbnails", settings.showThumbnails).toBool();
     settings.showVideoThumbnails = store.value("treemap/showVideoThumbnails", settings.showVideoThumbnails).toBool();
     settings.thumbnailResolution = store.value("treemap/thumbnailResolution", settings.thumbnailResolution).toInt();
@@ -847,13 +859,15 @@ void TreemapSettings::save(QSettings& store) const
     store.setValue("treemap/wheelZoomMaxScale", snapshot.wheelZoomMaxScale);
     store.setValue("treemap/fastWheelZoom", snapshot.fastWheelZoom);
     store.setValue("treemap/trackpadScrollPans", snapshot.trackpadScrollPans);
+    store.setValue("treemap/doubleClickToOpen", snapshot.doubleClickToOpen);
     store.setValue("treemap/cameraDurationMs", snapshot.cameraDurationMs);
     store.setValue("treemap/cameraMaxScale", snapshot.cameraMaxScale);
     store.setValue("treemap/parallelPartitionDepth", snapshot.parallelPartitionDepth);
     store.setValue("treemap/maxSemanticDepth", snapshot.maxSemanticDepth);
     store.setValue("treemap/edgeFocusInsetRatio", snapshot.edgeFocusInsetRatio);
     store.setValue("treemap/tileAspectBias", snapshot.tileAspectBias);
-    store.setValue("treemap/liveScanPreview", snapshot.liveScanPreview);
+    store.setValue("treemap/scanPreviewMode", snapshot.scanPreviewMode);
+    store.remove("treemap/liveScanPreview");
     store.setValue("treemap/simpleTooltips", snapshot.simpleTooltips);
     store.setValue("treemap/hideNonLocalFreeSpace", snapshot.hideNonLocalFreeSpace);
     store.setValue("treemap/showThumbnails", snapshot.showThumbnails);

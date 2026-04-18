@@ -67,12 +67,12 @@ void populateTypeLegendItems(QTreeWidget* tree, QLabel* summaryLabel,
 bool sameViewState(const TreemapWidget::ViewState& a, const TreemapWidget::ViewState& b);
 bool isOverviewState(const TreemapWidget::ViewState& state);
 FileNode* findNodeByPath(FileNode* node, const QString& targetPath);
+FileNode* findNodeByPath(const std::shared_ptr<TreemapSnapshot>& snapshot, const QString& targetPath);
 FileNode* findVirtualFreeSpaceNode(FileNode* root);
 bool pathIsWithinRoot(const QString& path, const QString& rootPath);
 void collectWatchDirectoryPaths(FileNode* root, FileNode* current, QStringList& paths);
 QString nearestExistingNodePath(FileNode* root, QString path);
-ViewStatePaths captureViewStatePaths(const TreemapWidget::ViewState& state);
-TreemapWidget::ViewState remapViewStatePaths(const ViewStatePaths& original, FileNode* root);
+NodeKey nearestExistingNodeKey(const std::shared_ptr<TreemapSnapshot>& snapshot, NodeKey key);
 QString nearestExistingDirectoryOnDisk(QString path);
 FileNode* topLevelRefreshNode(FileNode* scanRoot, FileNode* currentNode);
 QString searchPatternPlaceholderText();
@@ -80,6 +80,8 @@ QString formatPinnedDataSize(qint64 bytes);
 QStringList mountedDevicePaths();
 void sortChildrenBySizeRecursive(FileNode* node);
 void applyFreeSpaceNodeColor(FileNode* root, const TreemapSettings& settings);
+void applyStableItemTextBrush(QTreeWidget* tree, QTreeWidgetItem* item);
+void refreshTreeItemTextBrushes(QTreeWidget* tree, QTreeWidgetItem* item);
 int countFilesRecursive(const FileNode* node);
 FileNodeStats fileNodeStats(const FileNode* node);
 int nodeDepth(const FileNode* node);
@@ -90,10 +92,7 @@ std::vector<FileNode*> prepareRootResultForDisplay(ScanResult& scanResult, const
 std::vector<FileNode*> reinjectFreeSpaceNodes(ScanResult& scanResult, const QString& currentPath,
                                               bool showFreeSpaceInOverview,
                                               const TreemapSettings& settings);
-std::vector<TreemapWidget::ViewState> remapHistoryPaths(const std::vector<ViewStatePaths>& historyPaths,
-                                                        FileNode* root);
 bool sameSubtree(const FileNode* a, const FileNode* b);
-TreemapWidget::ViewState remapViewStateByPath(const TreemapWidget::ViewState& original, FileNode* root);
 void sanitizeHistoryForRoot(std::vector<TreemapWidget::ViewState>& history, FileNode* root);
 qint64 pruneDeletedChildren(FileNode* node);
 qint64 directorySizeOnDisk(const QString& path);

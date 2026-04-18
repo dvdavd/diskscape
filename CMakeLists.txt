@@ -169,6 +169,8 @@ target_include_directories(scanner_bench PRIVATE src)
 
 target_link_libraries(scanner_bench PRIVATE
     Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
 )
 
 if (WIN32)
@@ -334,6 +336,22 @@ diskvu_add_test(test_searchfilterpanel
 diskvu_add_test(test_filesystemutils
     tests/test_filesystemutils.cpp
     ${DISKVU_FILESYSTEMUTILS_SRC}
+)
+
+diskvu_add_test(test_filesystemwatchcontroller
+    tests/test_filesystemwatchcontroller.cpp
+    src/filesystemwatchcontroller.h
+    src/filesystemwatchcontroller.cpp
+    src/scanner.h
+    ${SCANNER_BACKEND_SRC}
+    ${DISKVU_WIDGET_SRC}
+)
+
+diskvu_add_test(test_subtree_refresh_paths
+    tests/test_subtree_refresh_paths.cpp
+    src/scanner.h
+    ${SCANNER_BACKEND_SRC}
+    ${DISKVU_WIDGET_SRC}
 )
 
 endif() # BUILD_TESTING

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "filenode.h"
+#include "treemapsnapshot.h"
 #include "filterparams.h"
 #include "treemapsettings.h"
 #include <QAbstractScrollArea>
@@ -18,6 +19,7 @@
 #include <QPen>
 #include <QPixmap>
 #include <QPointF>
+#include <QPointer>
 #include <QPropertyAnimation>
 #include <QRectF>
 #include <QRegularExpression>
@@ -29,6 +31,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -46,13 +49,17 @@ class QScrollBar;
 // Held via shared_ptr so background tasks keep it alive after a tree change.
 struct SearchIndex {
     std::vector<FileNode*> nodes;      // all searchable nodes (files + dirs)
-    std::vector<QString> pathCache;    // indexed by node->id; full absolute path
     std::vector<uint32_t> nameOffsets; // indexed by node->id → byte offset in flatNames
     std::vector<uint16_t> nameLens;    // indexed by node->id → byte length in flatNames
     QHash<uint64_t, std::vector<FileNode*>> filesByExt; // packed extension key → matching files
     std::string flatNames;             // flat UTF-8 buffer of all case-folded names
     std::vector<uint32_t> markCache;   // indexed by node->id; bitmask of FolderMark values (1 << mark)
     std::vector<uint32_t> directMarkCache; // indexed by node->id; bitmask of FolderMark values (1 << mark) if node has it directly
+    // Pending per-node mark values computed by the background task; applied to
+    // FileNode fields on the main thread in onMetadataTaskFinished to avoid
+    // racing with paintNode reading colorMark/iconMark/id concurrently.
+    std::vector<uint8_t> pendingColorMarks;
+    std::vector<uint8_t> pendingIconMarks;
     uint32_t nodeCount = 0;
     std::shared_ptr<NodeArena> arenaOwner;
 };
@@ -86,19 +93,21 @@ class TreemapWidget : public QAbstractScrollArea {
 
 public:
     struct ViewState {
-        FileNode* node = nullptr;
+        NodeKey nodeKey;
         qreal cameraScale = 1.0;
         QPointF cameraOrigin;
         int semanticDepth = TreemapSettings::defaults().baseVisibleDepth;
-        FileNode* semanticFocus = nullptr;
-        FileNode* semanticLiveRoot = nullptr;
+        NodeKey semanticFocusKey;
+        NodeKey semanticLiveRootKey;
         qreal currentRootLayoutAspectRatio = 0.0;
     };
 
     explicit TreemapWidget(QWidget* parent = nullptr);
+    ~TreemapWidget() override;
 
-    void setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena = {},
+    void setRoot(std::shared_ptr<TreemapSnapshot> snapshot,
                  bool prepareModel = true, bool animateLayout = true);
+    void updateSnapshot(std::shared_ptr<TreemapSnapshot> snapshot);
     QString nodePath(const FileNode* node) const;
     void notifyTreeChanged();
     void setCurrentNode(FileNode* node, const QPointF& anchorPos = QPointF(), bool useAnchor = false);
@@ -128,11 +137,14 @@ public:
     FileNode* currentNode() const { return m_current; }
     FileNodeStats filteredStats(const FileNode* node) const;
     qint64 effectiveNodeSize(const FileNode* node) const;
+    qint64 nodeLayoutSize(const FileNode* node) const;
+    qint64 nodeDisplaySize(const FileNode* node) const;
     const TreemapSettings& settings() const { return m_settings; }
     qreal cameraScale() const { return m_cameraScale; }
+    bool navigationAnimationInProgress() const;
     ViewState currentViewState() const;
     ViewState overviewViewState(FileNode* node = nullptr) const;
-    bool hasOpenImagePreview() const { return m_imagePreviewNode != nullptr || m_imagePreviewProgress > 0.0; }
+    bool hasOpenImagePreview() const { return !m_imagePreviewPath.isEmpty() || m_imagePreviewProgress > 0.0; }
     void closeImagePreviewFromNavigation();
     void applyLoadedImagePreview(const QString& path, const QImage& image);
     bool nodeSupportsImagePreview(const FileNode* node) const;
@@ -140,6 +152,7 @@ public:
 
 signals:
     void nodeActivated(FileNode* node);
+    void nodeOpenFile(FileNode* node);
     void nodeHovered(FileNode* node);
     void backRequested();
     void zoomInRequested(FileNode* node, QPointF anchorPos);
@@ -202,10 +215,19 @@ private:
                                         const QFontMetrics& metrics, quint64 fontKey,
                                         int bucket,
                                         Qt::LayoutDirection direction = Qt::LeftToRight) const;
+    struct FilteredChildren {
+        std::vector<FileNode*> children;
+        std::vector<FileNode*> freeChildren;
+        qint64 total = 0;
+        qint64 freeTotal = 0;
+    };
+    FilteredChildren computeFilteredChildren(FileNode* node, bool parentMatches) const;
+
     void layoutVisibleChildren(FileNode* node, const QRectF& tileViewRect,
                                const QRectF& viewContent,
                                const QRectF& visibleClip,
-                               std::vector<std::pair<FileNode*, QRectF>>& out) const;
+                               std::vector<std::pair<FileNode*, QRectF>>& out,
+                               bool parentMatches) const;
     QSizeF stabilizedNodeSize(const FileNode* node, StableMetricChannel channel,
                               const QSizeF& size, qreal widthBucket,
                               qreal heightBucket, qreal widthHysteresis,
@@ -236,15 +258,19 @@ private:
     void startZoomAnimation(const QPixmap& previousFrame, const QRectF& sourceRect,
                             bool zoomIn, bool crossfadeOnly = false);
     bool findVisibleViewRect(FileNode* root, const QRectF& rootViewRect,
-                             FileNode* target, QRectF* outRect, int depth = -1) const;
+                             FileNode* target, QRectF* outRect, int depth, bool parentMatches) const;
     void relayout();
     void rebuildSearchMatches();
     void clearIncrementalSearchState();
     void cancelPendingSearch();
     void cancelPendingMetadata();
     void onSearchTaskFinished();
+    void shutdownAsyncWorkers(bool waitForFinished);
     void rebuildSearchMetadataAsync();
-    void onMetadataTaskFinished();
+    void onMetadataTaskFinished(std::shared_ptr<SearchIndex> index,
+                                FileNode* expectedRoot,
+                                std::shared_ptr<NodeArena> expectedArena,
+                                quint64 taskId);
     void rebuildFileTypeMatchesAsync();
     void cancelPendingFileTypeHighlight();
     void onFileTypeMatchTaskFinished();
@@ -254,20 +280,21 @@ private:
                             Predicate&& isDirectMatch, quint8 selfMatchFlag, quint8 subtreeMatchFlag);
     bool isDescendantOf(const FileNode* node, const FileNode* ancestor) const;
     static void sortChildrenBySize(FileNode* node);
-    void paintNode(QPainter& painter, FileNode* node, int depth,
+    void paintNode(QPainter& p, FileNode* node, int depth,
                    const QRectF& visibleClip, const QRectF& viewRect,
-                   qreal subtreeHoverBlend = 0.0, qreal subtreePrevHoverBlend = 0.0,
-                   bool applyOwnReveal = true,
+                   qreal subtreeHoverBlend, qreal subtreePrevHoverBlend,
+                   bool applyOwnReveal, bool parentMatches,
                    SceneRenderLayer layer = SceneRenderLayer::All);
     void paintMatchOverlayNode(QPainter& painter, FileNode* node, int depth,
                                const QRectF& visibleClip, const QRectF& viewRect,
-                               bool drawBorders) const;
+                               bool drawBorders, bool parentMatches) const;
     FileNode* hitTestChildren(FileNode* node, const QPointF& pos, int depth,
                               const QRectF& tileViewRect, const QRectF& contentArea,
-                              const QRectF& visibleClip,
+                              const QRectF& visibleClip, bool parentMatches,
                               QRectF* outRect = nullptr) const;
     FileNode* hitTest(FileNode* node, const QPointF& pos, int depth,
-                      const QRectF& viewRect, QRectF* outRect = nullptr) const;
+                      const QRectF& viewRect, bool parentMatches,
+                      QRectF* outRect = nullptr) const;
     void syncSemanticDepthToScale();
     void syncScrollBars();
     void applyScrollBarCameraPosition();
@@ -276,7 +303,7 @@ private:
     void setOverlayScrollBarExpanded(QScrollBar* bar, bool expanded);
     void setOverlayScrollBarVisible(QScrollBar* bar, bool visible);
     qreal computeCurrentRootLayoutAspectRatio() const;
-    void clearHoverState(bool notify = true);
+    void clearHoverState(bool notify = true, bool hideTooltip = true);
     void updateOwnedTooltipStyle();
     void updateOwnedTooltipLayoutDirection();
     QIcon fallbackTooltipIcon(bool isDirectory) const;
@@ -310,11 +337,15 @@ private:
     void closeImagePreview(bool animated = true);
     void clearImagePreview();
     void paintImagePreviewOverlay(QPainter& painter);
+    void paintLaunchAnimations(QPainter& painter);
+    void syncSnapshotCache();
+    FileNode* currentImagePreviewNode() const;
+    void resetLiveRenderCache();
 
     bool continuousZoomGeometryActive() const;
 
-    FileNode* m_root = nullptr;
-    std::shared_ptr<NodeArena> m_rootArena;
+    std::shared_ptr<TreemapSnapshot> m_snapshot;
+    FileNode* m_root = nullptr; // non-owning cache of m_snapshot->root for hot widget paths
     FileNode* m_current = nullptr;
     FileNode* m_hovered = nullptr;
     FileNode* m_previousHovered = nullptr;
@@ -362,6 +393,7 @@ private:
     // Per-frame constants snapshotted in drawScene — identical for every node
     qreal m_framePixelScale  = 1.0;
     qreal m_frameOutlineWidth = 0.0;
+    FileNode* m_frameImagePreviewNode = nullptr;
 
     // Cached drawing resources
     QFont m_font;
@@ -423,8 +455,14 @@ private:
     QString m_highlightedFileType;
     QString m_previousHighlightedFileType;
     QPointF m_lastActivationPos;
+    struct LaunchAnimation {
+        QRectF rect;
+        qreal progress = 0.0;
+    };
+    QList<LaunchAnimation> m_launchAnimations;
+    QVariantAnimation m_launchProgressAnimation;
+
     bool m_contextMenuActive = false;
-    FileNode* m_imagePreviewNode = nullptr;
     QString m_imagePreviewPath;
     QRectF m_imagePreviewSourceRect;
     QImage m_imagePreviewImage;
@@ -438,7 +476,7 @@ private:
     bool m_pressHoldActive = false;
     bool m_pressHoldFromTouch = false;
     bool m_pressHoldTriggered = false;
-    FileNode* m_pressHoldNode = nullptr;
+    QString m_pressHoldPath;
     QPointF m_pressHoldStartPos;
     QPointF m_pressHoldCurrentPos;
     bool m_touchGestureActive = false;
@@ -478,10 +516,17 @@ private:
     std::shared_ptr<SearchIndex> m_pendingSearchIndex;  // which index the in-flight search used
     std::shared_ptr<std::atomic<bool>> m_searchCancelToken;
     std::shared_ptr<std::atomic<bool>> m_metadataCancelToken;
+    std::thread m_metadataThread;
+    FileNode* m_pendingMetadataRoot = nullptr;
+    std::shared_ptr<NodeArena> m_pendingMetadataArena;
     QFutureWatcher<SearchMatchResult>* m_searchWatcher = nullptr;
-    QFutureWatcher<std::shared_ptr<SearchIndex>>* m_metadataWatcher = nullptr;
+    bool m_metadataTaskRunning = false;   // true while a task is set and not yet finished
+    bool m_metadataRestartPending = false; // true if rebuildSearchMetadataAsync was called while busy
+    quint64 m_nextMetadataTaskId = 0;
+    quint64 m_activeMetadataTaskId = 0;
     std::shared_ptr<std::atomic<bool>> m_fileTypeCancelToken;
     QFutureWatcher<FileTypeMatchResult>* m_fileTypeWatcher = nullptr;
+    std::shared_ptr<SearchIndex> m_pendingFileTypeIndex;
     std::vector<uint8_t> m_fileTypeMatchCache;
     std::vector<uint8_t> m_combinedMatchCache;
     std::vector<bool>    m_searchReachCache;   // forward-DFS reach, built by the async search worker
@@ -493,6 +538,7 @@ private:
     QString m_pendingTooltipIconPath;
     bool m_pendingTooltipIconIsDirectory = false;
     bool m_tooltipIconLoadQueued = false;
+    bool m_asyncShutdown = false;
 
 public:
     QHash<QString, QPixmap> m_thumbnailStore;
@@ -573,7 +619,7 @@ quint8 TreemapWidget::rebuildMatchTree(FileNode* node, std::vector<uint8_t>& mat
     }
 
     quint8 flags = isDirectMatch(node) ? selfMatchFlag : 0;
-    for (FileNode* child : node->children) {
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
         if (rebuildMatchTree(child, matchCache, isDirectMatch,
                              selfMatchFlag, subtreeMatchFlag) != 0) {
             flags |= subtreeMatchFlag;

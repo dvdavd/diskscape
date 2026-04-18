@@ -7,15 +7,56 @@
 // (required for the thread_local statics inside emitProgress).
 
 #include "scanner.h"
+#include "filesystemutils.h"
 
 #include <QDir>
 #include <QElapsedTimer>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QStringList>
+#include <QSemaphore>
+#include <QHash>
+#include <QStorageInfo>
 #include <algorithm>
 #include <atomic>
 #include <vector>
+
+struct ScanThrottler {
+    QSemaphore networkSemaphore{2};
+    QMutex mutex;
+    QHash<unsigned long long, bool> isLocalCache;
+
+    bool isLocal(unsigned long long dev, const QString& path)
+    {
+        QMutexLocker locker(&mutex);
+        auto it = isLocalCache.find(dev);
+        if (it != isLocalCache.end()) {
+            return *it;
+        }
+        bool local = isLocalFilesystem(QStorageInfo(path));
+        isLocalCache.insert(dev, local);
+        return local;
+    }
+};
+
+struct ThrottleGuard {
+    QSemaphore* sem;
+    bool active;
+    ThrottleGuard(QSemaphore* s, bool a)
+        : sem(s)
+        , active(a)
+    {
+        if (active && sem) {
+            sem->acquire(1);
+        }
+    }
+    ~ThrottleGuard()
+    {
+        if (active && sem) {
+            sem->release(1);
+        }
+    }
+};
 
 static constexpr int kMaxDepth = 64;
 static constexpr qint64 kProgressIntervalMs = 180;
@@ -28,7 +69,6 @@ static constexpr size_t kPreviewChildLimits[] = {
     160,
     384,
 };
-static constexpr qint64 kProvisionalDirectoryPreviewSize = 1;
 
 namespace {
 
@@ -46,7 +86,13 @@ QStringList defaultExcludedPathsForScanRoot(const QString& scanRootPath)
         QStringLiteral("/run"),
     };
 #elif defined(Q_OS_MACOS)
-    return { QStringLiteral("/dev") };
+    return {
+        QStringLiteral("/dev"),
+        // macOS exposes implementation-detail mounts under /System/Volumes
+        // (Data, VM, Preboot, Update, etc.). Skip them during root scans and
+        // prefer the user-facing aliases and mount points elsewhere.
+        QStringLiteral("/System/Volumes"),
+    };
 #else
     return {};
 #endif
@@ -94,7 +140,7 @@ bool shouldSkipPath(const QString& candidatePath,
     return false;
 }
 
-bool isCancelled(const std::atomic_bool* cancelFlag)
+bool isCancelled(const std::shared_ptr<const std::atomic_bool>& cancelFlag)
 {
     return cancelFlag && cancelFlag->load(std::memory_order_relaxed);
 }
@@ -141,32 +187,6 @@ size_t previewChildLimitForDepth(int remainingDepth)
     return kPreviewChildLimits[index];
 }
 
-bool pathIsWithinNode(const FileNode* node, const QString& currentPath)
-{
-    if (!node || currentPath.isEmpty()) {
-        return false;
-    }
-
-    const QString nodePath = !node->absolutePath.isEmpty() ? node->absolutePath : node->computePath();
-    if (nodePath.isEmpty()) {
-        return false;
-    }
-
-    if (currentPath.size() <= nodePath.size()) {
-        return currentPath == nodePath;
-    }
-
-    if (!currentPath.startsWith(nodePath)) {
-        return false;
-    }
-
-    if (nodePath.endsWith(QLatin1Char('/'))) {
-        return true;
-    }
-
-    return currentPath.at(nodePath.size()) == QLatin1Char('/');
-}
-
 bool pathIsWithinCandidate(const QString& currentPath, const QString& candidatePath)
 {
     if (currentPath.size() <= candidatePath.size()) {
@@ -198,6 +218,54 @@ void addSizeUpwards(FileNode* node, qint64 delta)
     addStatsUpwards(node, delta, 0);
 }
 
+// Recomputes size and subtreeFileCount bottom-up from actual children.
+// Used after dynamic task re-parenting to fix sizes without relying on
+// incremental addStatsUpwards calls across arena boundaries.
+void recomputeNodeStats(FileNode* node)
+{
+    if (!node || !node->isDirectory())
+        return;
+
+    qint64 totalSize = 0;
+    int totalFiles = 0;
+    for (FileNode* c = node->firstChild; c; c = c->nextSibling) {
+        recomputeNodeStats(c);
+        totalSize += c->size;
+        totalFiles += c->isDirectory() ? c->subtreeFileCount : 1;
+    }
+    node->size = totalSize;
+    node->subtreeFileCount = totalFiles;
+}
+
+qint64 recomputeApparentSizes(FileNode* node)
+{
+    if (!node) {
+        return 0;
+    }
+
+    if (!node->isDirectory() || node->isVirtual()) {
+        node->displaySize = node->isVirtual() ? node->size : std::max<qint64>(node->displaySize, node->size);
+        return node->displaySize;
+    }
+
+    if (!node->firstChild) {
+        // Childless directory: either truly empty (size==0) or depth-truncated
+        // clone. In either case, use size as the apparent-size proxy so truncated
+        // nodes retain their full subtree weight in the layout.
+        if (node->displaySize == 0)
+            node->displaySize = node->size;
+        return node->displaySize;
+    }
+
+    qint64 total = 0;
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual())
+            total += recomputeApparentSizes(child);
+    }
+    node->displaySize = total;
+    return total;
+}
+
 FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,
                            const QString& currentPath, const QString& nodePath,
                            NodeArena& arena, FileNode* parent = nullptr)
@@ -207,63 +275,81 @@ FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,
 
     FileNode* copy = arena.alloc();
     copy->name = node->name;
-    copy->absolutePath = node->absolutePath;
     copy->size = node->size;
+    copy->displaySize = node->displaySize;
     copy->subtreeFileCount = node->subtreeFileCount;
-    copy->isDirectory = node->isDirectory;
-    copy->isVirtual = node->isVirtual;
+    copy->setIsDirectory(node->isDirectory());
+    copy->setIsVirtual(node->isVirtual());
     copy->color = node->color;
-    copy->extKey = node->extKey;
+    copy->id = node->id;
+    copy->setColorMark(node->colorMark());
+    copy->setIconMark(node->iconMark());
+    copy->mtime = node->mtime;
     copy->parent = parent;
 
     if (remainingDepth > 0) {
+        const size_t childLimit = previewChildLimitForDepth(remainingDepth);
+        const size_t reservedSlots = 1u; // reserve space for activeChild if it exists
+        const size_t maxSelected = (childLimit > reservedSlots) ? childLimit - reservedSlots : 0u;
+
         std::vector<const FileNode*> selectedChildren;
         const FileNode* activeChild = nullptr;
-        selectedChildren.reserve(node->children.size());
-        for (const FileNode* child : node->children) {
-            if (!child) {
+        
+        auto compareBySize = [](const FileNode* a, const FileNode* b) {
+            return std::max(a->size, a->displaySize) > std::max(b->size, b->displaySize);
+        };
+        // Min-heap comparison: smallest element at the front.
+        auto compareBySmallerSize = [](const FileNode* a, const FileNode* b) {
+            return std::max(a->size, a->displaySize) < std::max(b->size, b->displaySize);
+        };
+
+        const QString childPathPrefix = childPathPrefixForParent(nodePath);
+
+        for (const FileNode* child = node->firstChild; child; child = child->nextSibling) {
+            const qint64 previewSize = std::max(child->size, child->displaySize);
+            if (previewSize <= 0 && !child->isDirectory()) {
                 continue;
             }
-            if (child->size <= 0 && !child->isDirectory) {
-                continue;
-            }
-            if (!activeChild && child->isDirectory) {
-                const QString childPath = childPathForParent(nodePath, child->name);
+            if (!activeChild && child->isDirectory()) {
+                const QString childPath = childPathPrefix + child->name;
                 if (pathIsWithinCandidate(currentPath, childPath)) {
                     activeChild = child;
                     continue;
                 }
             }
-            selectedChildren.push_back(child);
+
+            if (maxSelected > 0) {
+                if (selectedChildren.size() < maxSelected) {
+                    selectedChildren.push_back(child);
+                    if (selectedChildren.size() == maxSelected) {
+                        std::make_heap(selectedChildren.begin(), selectedChildren.end(), compareBySmallerSize);
+                    }
+                } else if (std::max(child->size, child->displaySize) > std::max(selectedChildren.front()->size, selectedChildren.front()->displaySize)) {
+                    std::pop_heap(selectedChildren.begin(), selectedChildren.end(), compareBySmallerSize);
+                    selectedChildren.back() = child;
+                    std::push_heap(selectedChildren.begin(), selectedChildren.end(), compareBySmallerSize);
+                }
+            }
         }
 
-        const size_t childLimit = previewChildLimitForDepth(remainingDepth);
-        const size_t reservedSlots = activeChild ? 1u : 0u;
-        const size_t childCount = (childLimit > reservedSlots)
-            ? std::min(selectedChildren.size(), childLimit - reservedSlots)
-            : 0u;
-        if (selectedChildren.size() > childCount) {
-            std::nth_element(selectedChildren.begin(),
-                             selectedChildren.begin() + static_cast<std::ptrdiff_t>(childCount),
-                             selectedChildren.end(),
-                             [](const FileNode* a, const FileNode* b) {
-                                 return a->size > b->size;
-                             });
-            selectedChildren.resize(childCount);
-        }
+        std::sort(selectedChildren.begin(), selectedChildren.end(), compareBySize);
 
-        std::sort(selectedChildren.begin(), selectedChildren.end(),
-                  [](const FileNode* a, const FileNode* b) {
-                      return a->size > b->size;
-                  });
+        FileNode* lastAdded = nullptr;
+        auto appendChild = [&](FileNode* childCopy) {
+            if (!copy->firstChild) {
+                copy->firstChild = childCopy;
+            } else {
+                lastAdded->nextSibling = childCopy;
+            }
+            lastAdded = childCopy;
+        };
 
-        copy->children.reserve(selectedChildren.size() + reservedSlots);
         if (activeChild) {
             const QString activeChildPath = childPathForParent(nodePath, activeChild->name);
             FileNode* childCopy = cloneNodeLimited(activeChild, remainingDepth - 1, currentPath,
                                                    activeChildPath, arena, copy);
             if (childCopy) {
-                copy->children.push_back(childCopy);
+                appendChild(childCopy);
             }
         }
         for (const FileNode* child : selectedChildren) {
@@ -271,7 +357,7 @@ FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,
             FileNode* childCopy = cloneNodeLimited(child, remainingDepth - 1, currentPath,
                                                    childPath, arena, copy);
             if (childCopy)
-                copy->children.push_back(childCopy);
+                appendChild(childCopy);
         }
     }
 
@@ -280,14 +366,11 @@ FileNode* cloneNodeLimited(const FileNode* node, int remainingDepth,
 
 void emitProgress(const ScanResult& scanState, const QString& currentPath,
                   const Scanner::ProgressReadyCallback& progressReadyCallback,
-                  const Scanner::ProgressCallback& progressCallback, bool force = false)
+                  const Scanner::ProgressCallback& progressCallback,
+                  bool force = false)
 {
     if (!progressCallback || !scanState.root)
         return;
-
-    if (scanState.profile) {
-        ++scanState.profile->progressCalls;
-    }
 
     static thread_local QElapsedTimer timer;
     static thread_local bool timerStarted = false;
@@ -298,16 +381,10 @@ void emitProgress(const ScanResult& scanState, const QString& currentPath,
     }
 
     if (!force && timer.elapsed() < kProgressIntervalMs) {
-        if (scanState.profile) {
-            ++scanState.profile->progressThrottleSkips;
-        }
         return;
     }
 
     if (!force && progressReadyCallback && !progressReadyCallback()) {
-        if (scanState.profile) {
-            ++scanState.profile->progressThrottleSkips;
-        }
         return;
     }
 
@@ -315,23 +392,16 @@ void emitProgress(const ScanResult& scanState, const QString& currentPath,
 
     ScanResult snapshot;
     snapshot.arena = std::make_shared<NodeArena>();
+    snapshot.rootPath = scanState.rootPath;
     snapshot.freeBytes = scanState.freeBytes;
     snapshot.totalBytes = scanState.totalBytes;
+    snapshot.fileCount = scanState.root->subtreeFileCount;
     snapshot.currentScanPath = currentPath;
-    QElapsedTimer cloneTimer;
-    cloneTimer.start();
     snapshot.root = cloneNodeLimited(scanState.root, kPreviewDepth, currentPath,
-                                     scanState.root->absolutePath, *snapshot.arena);
-    if (scanState.profile) {
-        ++scanState.profile->progressSnapshots;
-        scanState.profile->progressCloneNs += cloneTimer.nsecsElapsed();
-    }
-    QElapsedTimer callbackTimer;
-    callbackTimer.start();
+                                     scanState.rootPath, *snapshot.arena);
+    recomputeApparentSizes(snapshot.root);
+    rebuildScanResultSnapshot(snapshot);
     progressCallback(std::move(snapshot));
-    if (scanState.profile) {
-        scanState.profile->progressCallbackNs += callbackTimer.nsecsElapsed();
-    }
 }
 
 } // namespace

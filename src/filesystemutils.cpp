@@ -28,7 +28,9 @@ bool isLocalFilesystem(QStringView fileSystemType, const QByteArray& device, QSt
     const QString fsType = fileSystemType.trimmed().toString().toUpper();
 
 #ifdef Q_OS_WIN
-    if (matchesAnyFsType(fsType, {"CIFS", "NFS", "SMBFS", "NETFS", "RDPNP"})) {
+    if (matchesAnyFsType(fsType, {"CIFS", "NFS", "SMBFS", "NETFS", "RDPNP"}) ||
+        fsType.startsWith(QLatin1String("NFS")) ||
+        fsType.startsWith(QLatin1String("SMB"))) {
         return false;
     }
 
@@ -61,13 +63,18 @@ bool isLocalFilesystem(QStringView fileSystemType, const QByteArray& device, QSt
 #else
     if (matchesAnyFsType(fsType, {"NFS", "NFS4", "CIFS", "SMBFS", "AFPFS",
                                   "WEBDAV", "DAVFS", "9P", "9P2000.L",
-                                  "SSHFS", "FUSE.SSHFS"})) {
+                                  "SSHFS", "FUSE.SSHFS"}) ||
+        fsType.startsWith(QLatin1String("NFS")) ||
+        fsType.startsWith(QLatin1String("SMB"))) {
         return false;
     }
     if (device.startsWith("//")) {
         return false;
     }
     if (rootPath.startsWith(QLatin1String("//"))) {
+        return false;
+    }
+    if (device.contains(':')) {
         return false;
     }
     if (device.startsWith('/')) {

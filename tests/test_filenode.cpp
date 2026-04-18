@@ -11,6 +11,20 @@
 class TestFileNode : public QObject {
     Q_OBJECT
 
+private:
+    void linkChildren(FileNode* parent, const std::vector<FileNode*>& children)
+    {
+        if (children.empty()) {
+            parent->firstChild = nullptr;
+            return;
+        }
+        parent->firstChild = children[0];
+        for (size_t i = 0; i < children.size(); ++i) {
+            children[i]->parent = parent;
+            children[i]->nextSibling = (i + 1 < children.size()) ? children[i + 1] : nullptr;
+        }
+    }
+
 private slots:
     // ── NodeArena ────────────────────────────────────────────────────────────
 
@@ -27,9 +41,9 @@ private slots:
         QCOMPARE(node->size, qint64(0));
         QVERIFY(node->name.isEmpty());
         QVERIFY(node->parent == nullptr);
-        QVERIFY(node->children.empty());
-        QVERIFY(!node->isDirectory);
-        QVERIFY(!node->isVirtual);
+        QVERIFY(!node->firstChild);
+        QVERIFY(!node->isDirectory());
+        QVERIFY(!node->isVirtual());
     }
 
     void nodeArena_totalAllocated_tracksCount()
@@ -93,7 +107,7 @@ private slots:
     void computePath_rootWithAbsolutePath()
     {
         FileNode root;
-        root.absolutePath = "/home/user";
+        root.name = "/home/user";
         QCOMPARE(root.computePath(), "/home/user");
     }
 
@@ -101,14 +115,14 @@ private slots:
     {
         FileNode root;
         root.name = "mydir";
-        // No parent, no absolutePath: returns name as-is
+        // No parent, no rootPath: returns name as-is
         QCOMPARE(root.computePath(), "mydir");
     }
 
     void computePath_singleChild()
     {
         FileNode root;
-        root.absolutePath = "/home/user";
+        root.name = "/home/user";
         FileNode child;
         child.name   = "Documents";
         child.parent = &root;
@@ -118,7 +132,7 @@ private slots:
     void computePath_deepChain()
     {
         FileNode root;
-        root.absolutePath = "/home";
+        root.name = "/home";
         FileNode a;
         a.name   = "user";
         a.parent = &root;
@@ -134,7 +148,7 @@ private slots:
     void computePath_cleansRedundantSlashes()
     {
         FileNode root;
-        root.absolutePath = "/home/user/"; // trailing slash
+        root.name = "/home/user/"; // trailing slash
         FileNode child;
         child.name   = "file.txt";
         child.parent = &root;
@@ -158,7 +172,7 @@ private slots:
     void fileNodeStats_ignoresVirtualNodes()
     {
         FileNode virtualNode;
-        virtualNode.isVirtual = true;
+        virtualNode.setIsVirtual(true);
         virtualNode.size = 123;
 
         const FileNodeStats stats = fileNodeStats(&virtualNode);
@@ -169,39 +183,34 @@ private slots:
     void fileNodeStats_reportsRecursiveFileCountAndNodeSize()
     {
         FileNode root;
-        root.absolutePath = QStringLiteral("/scan");
-        root.isDirectory = true;
-        root.size = 330;
+        root.name = QStringLiteral("/scan");
+        root.setIsDirectory(true);
+        root.size = 1329;
 
         FileNode childDir;
         childDir.name = QStringLiteral("subdir");
-        childDir.isDirectory = true;
-        childDir.size = 230;
-        childDir.parent = &root;
+        childDir.setIsDirectory(true);
+        childDir.size = 1229;
 
         FileNode rootFile;
         rootFile.name = QStringLiteral("root.bin");
         rootFile.size = 100;
-        rootFile.parent = &root;
 
         FileNode nestedFileA;
         nestedFileA.name = QStringLiteral("a.txt");
         nestedFileA.size = 200;
-        nestedFileA.parent = &childDir;
 
         FileNode nestedVirtual;
         nestedVirtual.name = QStringLiteral("Free Space");
-        nestedVirtual.isVirtual = true;
+        nestedVirtual.setIsVirtual(true);
         nestedVirtual.size = 999;
-        nestedVirtual.parent = &childDir;
 
         FileNode nestedFileB;
         nestedFileB.name = QStringLiteral("b.txt");
         nestedFileB.size = 30;
-        nestedFileB.parent = &childDir;
 
-        root.children = {&childDir, &rootFile};
-        childDir.children = {&nestedFileA, &nestedVirtual, &nestedFileB};
+        linkChildren(&root, {&childDir, &rootFile});
+        linkChildren(&childDir, {&nestedFileA, &nestedVirtual, &nestedFileB});
 
         const FileNodeStats rootStats = fileNodeStats(&root);
         QCOMPARE(rootStats.fileCount, 3);
@@ -390,15 +399,14 @@ private slots:
     {
         NodeArena arena;
         FileNode* root = arena.alloc();
-        root->isDirectory   = true;
-        root->absolutePath  = "/test";
+        root->setIsDirectory(true);
+        root->name          = "/test";
         root->size          = 1000;
 
         FileNode* child = arena.alloc();
         child->name      = "file.txt";
         child->size      = 1000;
-        child->parent    = root;
-        root->children.push_back(child);
+        linkChildren(root, {child});
 
         const TreemapSettings s;
         ColorUtils::assignColors(root, s);
@@ -409,37 +417,30 @@ private slots:
     void collectAndSortFileSummaries_limitsResultsToCurrentRoot()
     {
         FileNode root;
-        root.absolutePath = QStringLiteral("/scan");
-        root.isDirectory = true;
+        root.name = QStringLiteral("/scan");
+        root.setIsDirectory(true);
 
         FileNode childDir;
         childDir.name = QStringLiteral("subdir");
-        childDir.isDirectory = true;
-        childDir.parent = &root;
+        childDir.setIsDirectory(true);
 
         FileNode rootPdf;
         rootPdf.name = QStringLiteral("root.pdf");
-        rootPdf.parent = &root;
         rootPdf.size = 100;
-        rootPdf.extKey = ColorUtils::packFileExt(rootPdf.name);
         rootPdf.id = 0;
 
         FileNode childPdf;
         childPdf.name = QStringLiteral("child.pdf");
-        childPdf.parent = &childDir;
         childPdf.size = 40;
-        childPdf.extKey = ColorUtils::packFileExt(childPdf.name);
         childPdf.id = 1;
 
         FileNode childTxt;
         childTxt.name = QStringLiteral("child.txt");
-        childTxt.parent = &childDir;
         childTxt.size = 25;
-        childTxt.extKey = ColorUtils::packFileExt(childTxt.name);
         childTxt.id = 2;
 
-        root.children = {&rootPdf, &childDir};
-        childDir.children = {&childPdf, &childTxt};
+        linkChildren(&root, {&rootPdf, &childDir});
+        linkChildren(&childDir, {&childPdf, &childTxt});
 
         const QList<FileTypeSummary> summaries = collectAndSortFileSummaries(&childDir);
         QCOMPARE(summaries.size(), 2);
@@ -452,30 +453,25 @@ private slots:
     void collectAndSortFileSummaries_respectsSearchReachWithinSubtree()
     {
         FileNode root;
-        root.absolutePath = QStringLiteral("/scan");
-        root.isDirectory = true;
+        root.name = QStringLiteral("/scan");
+        root.setIsDirectory(true);
 
         FileNode childDir;
         childDir.name = QStringLiteral("subdir");
-        childDir.isDirectory = true;
-        childDir.parent = &root;
+        childDir.setIsDirectory(true);
 
         FileNode childPdf;
         childPdf.name = QStringLiteral("child.pdf");
-        childPdf.parent = &childDir;
         childPdf.size = 40;
-        childPdf.extKey = ColorUtils::packFileExt(childPdf.name);
         childPdf.id = 0;
 
         FileNode childTxt;
         childTxt.name = QStringLiteral("child.txt");
-        childTxt.parent = &childDir;
         childTxt.size = 25;
-        childTxt.extKey = ColorUtils::packFileExt(childTxt.name);
         childTxt.id = 1;
 
-        root.children = {&childDir};
-        childDir.children = {&childPdf, &childTxt};
+        linkChildren(&root, {&childDir});
+        linkChildren(&childDir, {&childPdf, &childTxt});
 
         const std::vector<bool> searchReach = {false, true};
         const QList<FileTypeSummary> summaries = collectAndSortFileSummaries(&childDir, searchReach);

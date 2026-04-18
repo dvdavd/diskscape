@@ -3,6 +3,7 @@
 #include "treemapwidget.h"
 #include "treemap_drawing.h"
 #include "colorutils.h"
+#include "svgutils.h"
 #include "thumbnailprovider.h"
 #include "filesystemutils.h"
 #include "mainwindow_utils.h"
@@ -856,19 +857,36 @@ TreemapWidget::TreemapWidget(QWidget* parent)
     m_searchWatcher = new QFutureWatcher<SearchMatchResult>(this);
     connect(m_searchWatcher, &QFutureWatcher<SearchMatchResult>::finished,
             this, &TreemapWidget::onSearchTaskFinished);
-    m_metadataWatcher = new QFutureWatcher<std::shared_ptr<SearchIndex>>(this);
-    connect(m_metadataWatcher, &QFutureWatcher<std::shared_ptr<SearchIndex>>::finished,
-            this, &TreemapWidget::onMetadataTaskFinished);
     m_fileTypeCancelToken = std::make_shared<std::atomic<bool>>(false);
     m_fileTypeWatcher = new QFutureWatcher<FileTypeMatchResult>(this);
     connect(m_fileTypeWatcher, &QFutureWatcher<FileTypeMatchResult>::finished,
             this, &TreemapWidget::onFileTypeMatchTaskFinished);
 
+    m_launchProgressAnimation.setDuration(350);
+    m_launchProgressAnimation.setStartValue(0.0);
+    m_launchProgressAnimation.setEndValue(1.0);
+    m_launchProgressAnimation.setEasingCurve(QEasingCurve::OutCubic);
+    connect(&m_launchProgressAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+        qreal progress = value.toReal();
+        for (auto& anim : m_launchAnimations) {
+            anim.progress = progress;
+        }
+        viewport()->update();
+    });
+    connect(&m_launchProgressAnimation, &QVariantAnimation::finished, this, [this]() {
+        m_launchAnimations.clear();
+        viewport()->update();
+    });
+}
+
+TreemapWidget::~TreemapWidget()
+{
+    shutdownAsyncWorkers(true);
 }
 
 bool TreemapWidget::viewportEvent(QEvent* event)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         switch (event->type()) {
         case QEvent::TouchBegin:
         case QEvent::TouchUpdate:
@@ -1115,7 +1133,10 @@ FileNodeStats TreemapWidget::filteredStats(const FileNode* node) const
     }
 
     if (!m_searchActive && m_highlightedFileType.isEmpty()) {
-        return fileNodeStats(node);
+        FileNodeStats stats;
+        stats.fileCount = node->subtreeFileCount;
+        stats.totalSize = node->isVirtual() ? fileNodeStats(node).totalSize : node->displaySize;
+        return stats;
     }
 
     FileNodeStats stats;
@@ -1127,12 +1148,12 @@ FileNodeStats TreemapWidget::filteredStats(const FileNode* node) const
         if (flags & 0x01 || flags & 0x04) {
             const FileNodeStats s = fileNodeStats(n);
             stats.fileCount += s.fileCount;
-            stats.totalSize += s.totalSize;
+            stats.totalSize += !n->isVirtual() ? n->displaySize : s.totalSize;
             return;
         }
 
         if (flags & 0x02) { // Subtree match (kSearchSubtreeMatch=0x2, kTypeSubtreeMatch=0x2)
-            for (const FileNode* child : n->children) {
+            for (const FileNode* child = n->firstChild; child; child = child->nextSibling) {
                 recurse(child);
             }
         }
@@ -1146,17 +1167,38 @@ qint64 TreemapWidget::effectiveNodeSize(const FileNode* node) const
 {
     if (!node) return 0;
     qint64 sum = 0;
-    for (const FileNode* c : node->children) {
-        if (c && c->size > 0) sum += c->size;
+    for (const FileNode* c = node->firstChild; c; c = c->nextSibling) {
+        const qint64 childSize = nodeLayoutSize(c);
+        if (childSize > 0) sum += childSize;
     }
-    return std::max(node->size, sum);
+    return std::max(nodeLayoutSize(node), sum);
+}
+
+qint64 TreemapWidget::nodeLayoutSize(const FileNode* node) const
+{
+    if (!node) {
+        return 0;
+    }
+    // Always lay out using apparent (displaySize) so no tile is ever invisible.
+    // Virtual nodes (free space) always have size == displaySize, so this is safe.
+    return node->displaySize;
+}
+
+qint64 TreemapWidget::nodeDisplaySize(const FileNode* node) const
+{
+    if (!node) {
+        return 0;
+    }
+    return node->displaySize;
 }
 
 void TreemapWidget::setFilterParams(const FilterParams& params)
 {
     if (params == m_filterParams) return;
 
-    clearHoverState(false);
+    // During live tree swaps we immediately recompute hover under the cursor.
+    // Keep the tooltip visible in the interim to avoid flicker/reset each snapshot.
+    clearHoverState(false, false);
     const bool hideChanged = params.hideNonMatching != m_filterParams.hideNonMatching;
     m_filterParams = params;
 
@@ -1196,8 +1238,8 @@ void TreemapWidget::clearAllNodeMarks()
 
     if (m_searchIndex) {
         for (FileNode* node : m_searchIndex->nodes) {
-            node->colorMark = 0;
-            node->iconMark = 0;
+            node->setColorMark(0);
+            node->setIconMark(0);
         }
         std::fill(m_searchIndex->markCache.begin(), m_searchIndex->markCache.end(), 0u);
         std::fill(m_searchIndex->directMarkCache.begin(), m_searchIndex->directMarkCache.end(), 0u);
@@ -1205,9 +1247,9 @@ void TreemapWidget::clearAllNodeMarks()
         // Fallback: recursive clear if index is not yet built.
         auto recurse = [](auto& self, FileNode* node) -> void {
             if (!node) return;
-            node->colorMark = 0;
-            node->iconMark = 0;
-            for (FileNode* child : node->children) {
+            node->setColorMark(0);
+            node->setIconMark(0);
+            for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
                 self(self, child);
             }
         };
@@ -1218,9 +1260,6 @@ void TreemapWidget::clearAllNodeMarks()
 QString TreemapWidget::nodePath(const FileNode* node) const
 {
     if (!node) return {};
-    if (m_searchIndex && node->id < m_searchIndex->pathCache.size()) {
-        return m_searchIndex->pathCache[node->id];
-    }
     return node->computePath();
 }
 
@@ -1339,11 +1378,49 @@ void TreemapWidget::resetZoomToActualSize()
     restoreViewState(overviewViewState(m_current));
 }
 
+void TreemapWidget::syncSnapshotCache()
+{
+    m_root = m_snapshot ? m_snapshot->root : nullptr;
+}
 
-void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena,
+FileNode* TreemapWidget::currentImagePreviewNode() const
+{
+    return (m_snapshot && !m_imagePreviewPath.isEmpty())
+        ? m_snapshot->findNode(m_imagePreviewPath)
+        : nullptr;
+}
+
+void TreemapWidget::resetLiveRenderCache()
+{
+    m_liveFrame = QPixmap();
+    m_liveStaticFrame = QPixmap();
+    m_liveDynamicFrame = QPixmap();
+    m_scrollBuffer = QPixmap();
+    m_liveFrameDeviceSize = QSize();
+    m_lastLiveRoot = nullptr;
+    m_lastLiveOrigin = QPointF();
+    m_lastLiveScale = 0.0;
+    m_lastLiveDepth = -1;
+}
+
+void TreemapWidget::updateSnapshot(std::shared_ptr<TreemapSnapshot> snapshot)
+{
+    auto oldSnapshot = std::move(m_snapshot);
+    m_snapshot = std::move(snapshot);
+    syncSnapshotCache();
+    resetLiveRenderCache();
+    // Old snapshots may still own a large arena and other per-tree data, so let
+    // destruction happen off the UI thread to avoid a visible hitch.
+    if (oldSnapshot) {
+        std::thread([oldSnapshot = std::move(oldSnapshot)]() {}).detach();
+    }
+}
+
+void TreemapWidget::setRoot(std::shared_ptr<TreemapSnapshot> snapshot,
                             bool prepareModel, bool animateLayout)
 {
     clearImagePreview();
+    cancelPressHold();
     m_zoomAnimation.stop();
     m_layoutAnimation.stop();
     m_cameraAnimation.stop();
@@ -1353,7 +1430,12 @@ void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena
     m_layoutPreviousFrame = QPixmap();
     m_layoutNextFrame = QPixmap();
     cancelPendingSearch();
+    cancelPendingMetadata();
     cancelPendingFileTypeHighlight();
+    m_metadataRestartPending = false;
+    m_pendingMetadataRoot = nullptr;
+    m_pendingMetadataArena.reset();
+    m_pendingFileTypeIndex.reset();
 
     // Move large per-tree caches out of the widget and let them destruct on a
     // background thread. Destroying them on the UI thread causes a noticeable
@@ -1383,8 +1465,27 @@ void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena
     m_searchReachCache = {};
     auto oldPreviousDirectSearchMatches = std::move(m_previousDirectSearchMatches);
     m_previousDirectSearchMatches = {};
-    auto oldRootArena = std::move(m_rootArena);
-    (void)QtConcurrent::run(
+    resetLiveRenderCache();
+    // Capture the layout animation snapshot while the current snapshot (and
+    // therefore m_current) is still alive. The old snapshot is moved into the
+    // background lambda below; any access to m_current after that point would
+    // be a use-after-free if the background thread frees the arena first.
+    const QString currentRootPath = (m_snapshot && m_current)
+        ? m_snapshot->keyFor(m_current).normalizedPath
+        : QString();
+    const QString nextRootPath = (snapshot && snapshot->root)
+        ? snapshot->keyFor(snapshot->root).normalizedPath
+        : QString();
+    const bool shouldAnimateLayout = animateLayout
+        && !currentRootPath.isEmpty()
+        && currentRootPath == nextRootPath
+        && !viewport()->size().isEmpty();
+    if (shouldAnimateLayout) {
+        m_layoutPreviousFrame = renderSceneToPixmap(m_current);
+    }
+
+    auto oldSnapshot = std::move(m_snapshot);
+    std::thread(
         [oldLiveSplitCache = std::move(oldLiveSplitCache),
          oldSizeLabelCache = std::move(oldSizeLabelCache),
          oldElidedTextCache = std::move(oldElidedTextCache),
@@ -1394,8 +1495,9 @@ void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena
          oldPendingSearchIndex = std::move(oldPendingSearchIndex),
          oldFileTypeMatchCache = std::move(oldFileTypeMatchCache),
          oldPreviousDirectSearchMatches = std::move(oldPreviousDirectSearchMatches),
-         oldRootArena = std::move(oldRootArena)]() mutable {
-        });
+         oldSnapshot = std::move(oldSnapshot)]() mutable {
+        })
+        .detach();
 
     m_nodeCount = 0;
     m_previousSearchCaseFoldedPattern.clear();
@@ -1408,22 +1510,16 @@ void TreemapWidget::setRoot(FileNode* root, std::shared_ptr<NodeArena> rootArena
     m_semanticFocus = nullptr;
     m_semanticLiveRoot = nullptr;
 
-    const bool shouldAnimateLayout = animateLayout && root && m_current
-        && root->computePath() == m_current->computePath()
-        && !viewport()->size().isEmpty();
-    if (shouldAnimateLayout) {
-        m_layoutPreviousFrame = renderSceneToPixmap(m_current);
-    }
-
-    m_rootArena = std::move(rootArena);
-    m_root = root;
-    m_current = root;
+    m_snapshot = std::move(snapshot);
+    syncSnapshotCache();
+    m_current = m_root;
     m_currentRootLayoutAspectRatio = computeCurrentRootLayoutAspectRatio();
     clearHoverState(false);
-    if (prepareModel) {
-        sortChildrenBySize(root);
+    if (prepareModel && m_root) {
+        sortChildrenBySize(m_root);
     }
     relayout();
+    refreshHoverUnderPointer();
     rebuildSearchMetadataAsync();
 
     // Capture the new state as a pixmap so paintEvent can do a clean
@@ -1448,12 +1544,12 @@ void TreemapWidget::setCurrentNode(FileNode* node, const QPointF& anchorPos, boo
 TreemapWidget::ViewState TreemapWidget::currentViewState() const
 {
     ViewState state;
-    state.node = m_current;
+    state.nodeKey = m_snapshot ? m_snapshot->keyFor(m_current) : NodeKey{};
     state.cameraScale = m_cameraScale;
     state.cameraOrigin = m_cameraOrigin;
     state.semanticDepth = m_activeSemanticDepth;
-    state.semanticFocus = m_semanticFocus;
-    state.semanticLiveRoot = m_semanticLiveRoot;
+    state.semanticFocusKey = m_snapshot ? m_snapshot->keyFor(m_semanticFocus) : NodeKey{};
+    state.semanticLiveRootKey = m_snapshot ? m_snapshot->keyFor(m_semanticLiveRoot) : NodeKey{};
     state.currentRootLayoutAspectRatio = m_currentRootLayoutAspectRatio;
     return state;
 }
@@ -1461,12 +1557,13 @@ TreemapWidget::ViewState TreemapWidget::currentViewState() const
 TreemapWidget::ViewState TreemapWidget::overviewViewState(FileNode* node) const
 {
     ViewState state;
-    state.node = node ? node : m_current;
+    FileNode* targetNode = node ? node : m_current;
+    state.nodeKey = m_snapshot ? m_snapshot->keyFor(targetNode) : NodeKey{};
     state.cameraScale = 1.0;
     state.cameraOrigin = QPointF();
     state.semanticDepth = m_settings.baseVisibleDepth;
-    state.semanticFocus = nullptr;
-    state.semanticLiveRoot = nullptr;
+    state.semanticFocusKey = {};
+    state.semanticLiveRootKey = {};
     state.currentRootLayoutAspectRatio = computeCurrentRootLayoutAspectRatio();
     return state;
 }
@@ -1474,7 +1571,14 @@ TreemapWidget::ViewState TreemapWidget::overviewViewState(FileNode* node) const
 void TreemapWidget::restoreViewState(const ViewState& state,
                                      const QPointF& anchorPos, bool useAnchor)
 {
-    if (!state.node) {
+    FileNode* targetNode = m_snapshot ? m_snapshot->findNode(state.nodeKey) : nullptr;
+    if (!targetNode && m_snapshot) {
+        targetNode = m_snapshot->findNode(nearestExistingNodeKey(m_snapshot, state.nodeKey));
+    }
+    if (!targetNode) {
+        targetNode = m_root;
+    }
+    if (!targetNode) {
         return;
     }
 
@@ -1486,14 +1590,15 @@ void TreemapWidget::restoreViewState(const ViewState& state,
     const int targetSemanticDepth = std::clamp(state.semanticDepth,
                                                m_settings.baseVisibleDepth,
                                                m_settings.maxSemanticDepth);
-    FileNode* targetNode = state.node;
+    FileNode* targetSemanticFocus = m_snapshot ? m_snapshot->findNode(state.semanticFocusKey) : nullptr;
+    FileNode* targetSemanticLiveRoot = m_snapshot ? m_snapshot->findNode(state.semanticLiveRootKey) : nullptr;
 
     const bool sameNode = (targetNode == m_current);
     const bool sameScale = std::abs(targetScale - m_cameraScale) < 0.0001;
     const bool sameOrigin = QLineF(targetOrigin, m_cameraOrigin).length() < 0.01;
     const bool sameDepth = (targetSemanticDepth == m_activeSemanticDepth);
-    const bool sameFocus = (state.semanticFocus == m_semanticFocus);
-    const bool sameLiveRoot = (state.semanticLiveRoot == m_semanticLiveRoot);
+    const bool sameFocus = (targetSemanticFocus == m_semanticFocus);
+    const bool sameLiveRoot = (targetSemanticLiveRoot == m_semanticLiveRoot);
     if (sameNode && sameScale && sameOrigin && sameDepth && sameFocus && sameLiveRoot) {
         return;
     }
@@ -1510,7 +1615,8 @@ void TreemapWidget::restoreViewState(const ViewState& state,
     if (canAnimate) {
         previousFrame = renderSceneToPixmap(m_current);
         const QRectF previousViewRect = currentRootViewRect();
-        if (findVisibleViewRect(m_current, previousViewRect, targetNode, &sourceRect)) {
+        const bool initialMatches = isDescendantOfDirectMatch(m_current);
+        if (findVisibleViewRect(m_current, previousViewRect, targetNode, &sourceRect, 0, initialMatches)) {
             zoomIn = true;
             hasMappedTransitionRect = true;
         }
@@ -1533,11 +1639,11 @@ void TreemapWidget::restoreViewState(const ViewState& state,
     }
     if (!sameNode) {
         m_activeSemanticDepth = targetSemanticDepth;
-        m_semanticFocus = targetScale > kZoomedInThreshold ? state.semanticFocus : nullptr;
-        m_semanticLiveRoot = targetScale > kZoomedInThreshold ? state.semanticLiveRoot : nullptr;
+        m_semanticFocus = targetScale > kZoomedInThreshold ? targetSemanticFocus : nullptr;
+        m_semanticLiveRoot = targetScale > kZoomedInThreshold ? targetSemanticLiveRoot : nullptr;
     }
 
-    m_current = state.node;
+    m_current = targetNode;
     if (!sameNode) {
         m_currentRootLayoutAspectRatio = state.currentRootLayoutAspectRatio > 0.0
             ? state.currentRootLayoutAspectRatio
@@ -1557,15 +1663,16 @@ void TreemapWidget::restoreViewState(const ViewState& state,
         m_cameraUseFocusAnchor = false;
         m_pendingRestoredViewState = true;
         m_pendingRestoredSemanticDepth = targetSemanticDepth;
-        m_pendingRestoredSemanticFocus = state.semanticFocus;
-        m_pendingRestoredSemanticLiveRoot = state.semanticLiveRoot;
+        m_pendingRestoredSemanticFocus = targetSemanticFocus;
+        m_pendingRestoredSemanticLiveRoot = targetSemanticLiveRoot;
         animateCameraTo(targetScale, targetOrigin);
         return;
     }
 
     if (canAnimate && previousNode && !sameNode) {
         const QRectF currentViewRect = currentRootViewRect();
-        if (findVisibleViewRect(m_current, currentViewRect, previousNode, &sourceRect)) {
+        const bool initialMatches = isDescendantOfDirectMatch(m_current);
+        if (findVisibleViewRect(m_current, currentViewRect, previousNode, &sourceRect, 0, initialMatches)) {
             zoomIn = false;
             hasMappedTransitionRect = true;
         }
@@ -1586,7 +1693,14 @@ void TreemapWidget::restoreViewState(const ViewState& state,
 
 void TreemapWidget::restoreViewStateImmediate(const ViewState& state)
 {
-    if (!state.node) {
+    FileNode* targetNode = m_snapshot ? m_snapshot->findNode(state.nodeKey) : nullptr;
+    if (!targetNode && m_snapshot) {
+        targetNode = m_snapshot->findNode(nearestExistingNodeKey(m_snapshot, state.nodeKey));
+    }
+    if (!targetNode) {
+        targetNode = m_root;
+    }
+    if (!targetNode) {
         return;
     }
 
@@ -1613,17 +1727,24 @@ void TreemapWidget::restoreViewStateImmediate(const ViewState& state)
     m_pendingRestoredSemanticLiveRoot = nullptr;
     m_liveSplitCache.clear();
 
-    m_current = state.node;
+    m_current = targetNode;
     m_currentRootLayoutAspectRatio = state.currentRootLayoutAspectRatio > 0.0
         ? state.currentRootLayoutAspectRatio
         : computeCurrentRootLayoutAspectRatio();
-    clearHoverState(false);
+    // Live scan view remaps call this frequently; avoid forcing tooltip fade-out
+    // and immediately re-evaluate hover under the current cursor.
+    clearHoverState(false, false);
     setCameraImmediate(targetScale, targetOrigin);
     m_activeSemanticDepth = targetSemanticDepth;
-    m_semanticFocus = targetScale > kZoomedInThreshold ? state.semanticFocus : nullptr;
-    m_semanticLiveRoot = targetScale > kZoomedInThreshold ? state.semanticLiveRoot : nullptr;
+    m_semanticFocus = targetScale > kZoomedInThreshold
+        ? (m_snapshot ? m_snapshot->findNode(state.semanticFocusKey) : nullptr)
+        : nullptr;
+    m_semanticLiveRoot = targetScale > kZoomedInThreshold
+        ? (m_snapshot ? m_snapshot->findNode(state.semanticLiveRootKey) : nullptr)
+        : nullptr;
 
     relayout();
+    refreshHoverUnderPointer();
 }
 
 int TreemapWidget::desiredSemanticDepthForScale(qreal scale) const
@@ -1645,10 +1766,12 @@ void TreemapWidget::syncSemanticDepthToScale()
     m_activeSemanticDepth = desiredSemanticDepthForScale(m_cameraScale);
 }
 
-void TreemapWidget::clearHoverState(bool notify)
+void TreemapWidget::clearHoverState(bool notify, bool hideTooltip)
 {
     if (!m_hovered && !m_previousHovered && m_hoveredRect.isEmpty() && m_previousHoveredRect.isEmpty()) {
-        hideOwnedTooltip();
+        if (hideTooltip) {
+            hideOwnedTooltip();
+        }
         return;
     }
 
@@ -1663,7 +1786,9 @@ void TreemapWidget::clearHoverState(bool notify)
     m_activeTooltipIconPath.clear();
     m_hoverAnimation.stop();
     m_hoverBlend = 1.0;
-    hideOwnedTooltip();
+    if (hideTooltip) {
+        hideOwnedTooltip();
+    }
     if (!dirty.isNull()) {
         viewport()->update(dirty);
     }
@@ -1966,8 +2091,8 @@ void TreemapWidget::showOwnedTooltip(const QPoint& globalPos, FileNode* node, co
 
     const bool firstShow = !m_ownsTooltip || !m_hoverTooltipWidget->isVisible();
     const bool simpleTooltips = m_settings.simpleTooltips;
-    const QString nodePath = (!node || node->isVirtual) ? QString() : node->computePath();
-    const bool isDirectory = node && node->isDirectory;
+    const QString nodePath = (!node || node->isVirtual()) ? QString() : node->computePath();
+    const bool isDirectory = node && node->isDirectory();
     QIcon icon;
     bool applyImmediateIcon = false;
     if (!simpleTooltips) {
@@ -2026,8 +2151,9 @@ void TreemapWidget::showOwnedTooltip(const QPoint& globalPos, FileNode* node, co
     }
     m_hoverTooltipTextLabel->setTextFormat(simpleTooltips ? Qt::PlainText : Qt::RichText);
     m_hoverTooltipTextLabel->setText(text);
-    m_hoverTooltipSizeLabel->setText(
-        tr("Size: %1").arg(QLocale::system().formattedDataSize(node ? node->size : 0)));
+    const qint64 shownSize = nodeDisplaySize(node);
+    const QString shownSizeText = QLocale::system().formattedDataSize(shownSize);
+    m_hoverTooltipSizeLabel->setText(tr("Size: %1").arg(shownSizeText));
 
     m_hoverTooltipBarWidget->setPercents(parentPercent, rootPercent);
     m_hoverTooltipStatsLabel->setText(
@@ -2072,9 +2198,37 @@ void TreemapWidget::stopAnimatedNavigation()
 
 bool TreemapWidget::nodeSupportsImagePreview(const FileNode* node) const
 {
-    return node && !node->isDirectory && !node->isVirtual
-        && (supportedImageExtKeys().contains(node->extKey)
-            || (m_settings.showVideoThumbnails && supportedVideoExtKeys().contains(node->extKey)));
+    if (!node || node->isDirectory() || node->isVirtual()) {
+        return false;
+    }
+
+    if (!m_settings.showThumbnails) {
+        return false;
+    }
+
+    const uint64_t extKey = ColorUtils::packFileExt(node->name);
+    const bool isImage = supportedImageExtKeys().contains(extKey);
+
+    // Don't allow clicking to expand previews of videos as they are often low resolution
+    // and not very helpful in the full-screen preview.
+    if (!isImage) {
+        return false;
+    }
+
+    // Don't show previews for images where thumbnails are disabled (e.g. on network locations
+    // if skipNetworkPaths is enabled) to avoid long waits or black screens.
+    if (m_settings.thumbnailSkipNetworkPaths) {
+        const QString path = nodePath(node);
+        // If it's already in the cache, we allow it.
+        if (m_thumbnailStore.contains(path)) {
+            return true;
+        }
+        if (!isLocalFilesystem(QStorageInfo(path))) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 QRectF TreemapWidget::imagePreviewSourceRectForNode(const FileNode* node) const
@@ -2084,7 +2238,8 @@ QRectF TreemapWidget::imagePreviewSourceRectForNode(const FileNode* node) const
     }
 
     QRectF sourceRect;
-    if (!findVisibleViewRect(m_current, currentRootViewRect(), const_cast<FileNode*>(node), &sourceRect)) {
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
+    if (!findVisibleViewRect(m_current, currentRootViewRect(), const_cast<FileNode*>(node), &sourceRect, 0, initialMatches)) {
         return {};
     }
     return sourceRect;
@@ -2106,12 +2261,13 @@ QSize TreemapWidget::imagePreviewBaseImageSize() const
 
 qreal TreemapWidget::imagePreviewBaseOpacity() const
 {
-    if (!m_settings.showThumbnails || !m_imagePreviewNode || m_imagePreviewPath.isEmpty() || !nodeSupportsImagePreview(m_imagePreviewNode)) {
+    FileNode* const previewNode = currentImagePreviewNode();
+    if (!m_settings.showThumbnails || !previewNode || m_imagePreviewPath.isEmpty() || !nodeSupportsImagePreview(previewNode)) {
         return 0.0;
     }
 
     const qreal tileRevealOpacity = tileRevealOpacityForNode(
-        m_imagePreviewNode,
+        previewNode,
         m_imagePreviewSourceRect.isValid() ? m_imagePreviewSourceRect : imagePreviewTargetRect());
     if (tileRevealOpacity <= 0.0) {
         return 0.0;
@@ -2123,7 +2279,7 @@ qreal TreemapWidget::imagePreviewBaseOpacity() const
     const qreal thumbHeightHysteresis = 8.0;
     const qreal thumbStartSize = std::max<qreal>(1.0, thumbFullSize - thumbRevealDistance);
     const QSizeF stableThumbnailSize = stabilizedNodeSize(
-        m_imagePreviewNode, StableMetricChannel::ThumbnailReveal,
+        previewNode, StableMetricChannel::ThumbnailReveal,
         m_imagePreviewSourceRect.isValid() ? m_imagePreviewSourceRect.size() : imagePreviewTargetRect().size(),
         kRevealWidthBucketPx, kRevealHeightBucketPx,
         thumbWidthHysteresis, thumbHeightHysteresis);
@@ -2167,7 +2323,6 @@ void TreemapWidget::requestImagePreview(FileNode* node, const QRectF& sourceRect
 
     const QString path = nodePath(node);
     const bool samePath = (path == m_imagePreviewPath);
-    m_imagePreviewNode = node;
     m_imagePreviewPath = path;
     m_imagePreviewSourceRect = sourceRect.isValid() ? sourceRect : imagePreviewSourceRectForNode(node);
     if (!m_imagePreviewSourceRect.isValid()) {
@@ -2194,7 +2349,7 @@ void TreemapWidget::requestImagePreview(FileNode* node, const QRectF& sourceRect
 
 void TreemapWidget::closeImagePreview(bool animated)
 {
-    if (!m_imagePreviewNode && m_imagePreviewProgress <= 0.0) {
+    if (m_imagePreviewPath.isEmpty() && m_imagePreviewProgress <= 0.0) {
         return;
     }
 
@@ -2217,7 +2372,6 @@ void TreemapWidget::closeImagePreview(bool animated)
 void TreemapWidget::clearImagePreview()
 {
     m_imagePreviewAnimation.stop();
-    m_imagePreviewNode = nullptr;
     m_imagePreviewPath.clear();
     m_imagePreviewSourceRect = QRectF();
     m_imagePreviewImage = QImage();
@@ -2244,7 +2398,7 @@ void TreemapWidget::applyLoadedImagePreview(const QString& path, const QImage& i
 
 void TreemapWidget::paintImagePreviewOverlay(QPainter& painter)
 {
-    if (!m_imagePreviewNode || m_imagePreviewProgress <= 0.0) {
+    if (m_imagePreviewPath.isEmpty() || m_imagePreviewProgress <= 0.0) {
         return;
     }
 
@@ -2425,8 +2579,9 @@ FileNode* TreemapWidget::interactiveNodeAt(const QPointF& pos) const
         return nullptr;
     }
 
-    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect());
-    if (!hit || hit == m_current || hit->isVirtual) {
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
+    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect(), initialMatches);
+    if (!hit || hit == m_current || hit->isVirtual()) {
         return nullptr;
     }
     return hit;
@@ -2439,7 +2594,8 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
     }
 
     QRectF hitRect;
-    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect(), &hitRect);
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
+    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect(), initialMatches, &hitRect);
     if (hit == m_current) {
         hit = nullptr;
         hitRect = QRectF();
@@ -2467,7 +2623,7 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
     const bool tooltipChanged = (hit != m_tooltipTarget);
     if (hit) {
         if (m_hoveredTooltip.isEmpty() || tooltipChanged) {
-            const QString nodePath = hit->isVirtual ? QString() : hit->computePath();
+            const QString nodePath = hit->isVirtual() ? QString() : hit->computePath();
             const QFileInfo info(nodePath);
             const QString displayPath = (nodePath.isEmpty() ? hit->name : nodePath);
             constexpr int kMaxSimpleTooltipPathChars = 80;
@@ -2488,7 +2644,8 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
             const QString cappedSimplePath = middleElideChars(displayPath, kMaxSimpleTooltipPathChars);
             const QString elidedSimplePath = m_hoverTooltipTextLabel->fontMetrics().elidedText(
                 cappedSimplePath, Qt::ElideMiddle, simplePathWidth);
-            const QString sizeStr = QLocale::system().formattedDataSize(hit->size);
+            const QString sizeStr = QLocale::system().formattedDataSize(
+                hit->isVirtual() ? hit->size : hit->displaySize);
             QString modifiedStr;
             if (hit->mtime > 0) {
                 const QDateTime dt = QDateTime::fromSecsSinceEpoch(hit->mtime);
@@ -2505,20 +2662,20 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
                 const bool rtl = layoutDirection() == Qt::RightToLeft;
                 const QString dirAttr = rtl ? QStringLiteral("rtl") : QStringLiteral("ltr");
                 const QString alignAttr = rtl ? QStringLiteral("right") : QStringLiteral("left");
-                const bool isConsolidatedChild = hit->isVirtual && hit->parent && hit->parent->isVirtual && hit->parent->isDirectory;
-                const QString displayName = hit->isVirtual
+                const bool isConsolidatedChild = hit->isVirtual() && hit->parent && hit->parent->isVirtual() && hit->parent->isDirectory();
+                const QString displayName = hit->isVirtual()
                     ? (isConsolidatedChild ? tr("Free Space") : hit->name)
                     : (!info.fileName().isEmpty() ? info.fileName() : nodePath);
-                const QString richPath = hit->isVirtual
+                const QString richPath = hit->isVirtual()
                     ? (isConsolidatedChild ? hit->name : QString())
                     : tooltipDisplayPath(info.absolutePath());
                 constexpr int kMaxTooltipPathChars = 64;
                 const QString cappedRichPath = middleElideChars(richPath, kMaxTooltipPathChars);
                 const QString elidedRichPath = m_hoverTooltipTextLabel->fontMetrics().elidedText(
                     cappedRichPath, Qt::ElideMiddle, richPathWidth);
-                const QString kindText = hit->isVirtual
+                const QString kindText = hit->isVirtual()
                     ? QCoreApplication::translate("ColorUtils", "Free Space")
-                    : (hit->isDirectory ? tr("Folder") : tr("File"));
+                    : (hit->isDirectory() ? tr("Folder") : tr("File"));
                 const QString escapedName = displayName.toHtmlEscaped();
                 const QString escapedPath = elidedRichPath.toHtmlEscaped();
                 m_hoveredTooltip = QStringLiteral("<div dir=\"%1\"><div align=\"%2\"><b>%3</b></div>")
@@ -2536,22 +2693,30 @@ void TreemapWidget::updateHoverAt(const QPointF& pos, const QPoint& globalPos, b
                     m_hoveredTooltip += QStringLiteral("<div align=\"%1\" style=\"opacity:0.78;\">%2</div>")
                         .arg(alignAttr, kindText.toHtmlEscaped());
                 }
+                if (!hit->isDirectory() && hit->hasHardLinks()) {
+                    const QString hlNote = hit->size == 0
+                        ? tr("Hard link - duplicate, counted via another link")
+                        : tr("Hard link - counted once on disk");
+                    m_hoveredTooltip += QStringLiteral(
+                        "<div align=\"%1\" style=\"opacity:0.78;\">%2</div>")
+                        .arg(alignAttr, hlNote.toHtmlEscaped());
+                }
                 m_hoveredTooltip += QStringLiteral("</div>");
             }
         }
         if (hoverChanged || hoverRectChanged || tooltipChanged || !m_ownsTooltip
                 || m_hoverTooltipTextLabel->text() != m_hoveredTooltip) {
-            const qint64 parentBaseline = hit->parent ? effectiveNodeSize(hit->parent) : hit->size;
+            const qint64 parentBaseline = hit->parent ? effectiveNodeSize(hit->parent) : hit->displaySize;
             const double parentPercent = (parentBaseline > 0)
-                ? (100.0 * static_cast<double>(hit->size) / static_cast<double>(parentBaseline))
+                ? (100.0 * static_cast<double>(hit->displaySize) / static_cast<double>(parentBaseline))
                 : 0.0;
 
-            const qint64 totalDataSize = m_root ? m_root->size : 0;
+            const qint64 totalDataSize = m_root ? m_root->displaySize : 0;
             const qint64 totalCapacity = effectiveNodeSize(m_root);
-            const qint64 rootBaseline = hit->isVirtual ? totalCapacity : totalDataSize;
+            const qint64 rootBaseline = hit->isVirtual() ? totalCapacity : totalDataSize;
 
             const double rootPercent = (rootBaseline > 0)
-                ? (100.0 * static_cast<double>(hit->size) / static_cast<double>(rootBaseline))
+                ? (100.0 * static_cast<double>(hit->displaySize) / static_cast<double>(rootBaseline))
                 : 0.0;
             showOwnedTooltip(globalPos, hit, m_hoveredTooltip, parentPercent, rootPercent);
         } else {
@@ -2575,7 +2740,7 @@ void TreemapWidget::refreshHoverUnderPointer()
         return;
     }
 
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         clearHoverState();
         return;
     }
@@ -2586,6 +2751,13 @@ void TreemapWidget::refreshHoverUnderPointer()
     }
 
     if (m_contextMenuActive || m_middlePanning || m_touchGestureActive || m_nativeGestureActive) {
+        return;
+    }
+
+    if (QApplication::activeModalWidget()) {
+        if (m_hovered || m_previousHovered || !m_hoveredRect.isEmpty() || !m_previousHoveredRect.isEmpty()) {
+            clearHoverState();
+        }
         return;
     }
 
@@ -2611,7 +2783,7 @@ void TreemapWidget::beginPressHold(FileNode* node, const QPointF& pos, bool from
     m_pressHoldActive = true;
     m_pressHoldFromTouch = fromTouch;
     m_pressHoldTriggered = false;
-    m_pressHoldNode = node;
+    m_pressHoldPath = (node && !node->isVirtual()) ? nodePath(node) : QString();
     m_pressHoldStartPos = pos;
     m_pressHoldCurrentPos = pos;
     m_pressHoldTimer.start();
@@ -2635,14 +2807,17 @@ void TreemapWidget::cancelPressHold()
     m_pressHoldActive = false;
     m_pressHoldFromTouch = false;
     m_pressHoldTriggered = false;
-    m_pressHoldNode = nullptr;
+    m_pressHoldPath.clear();
     m_pressHoldStartPos = QPointF();
     m_pressHoldCurrentPos = QPointF();
 }
 
 void TreemapWidget::triggerPressHoldContextMenu()
 {
-    if (!m_pressHoldActive || !m_pressHoldNode || m_scanInProgress) {
+    FileNode* const targetNode = (!m_pressHoldPath.isEmpty() && m_snapshot)
+        ? m_snapshot->findNode(m_pressHoldPath)
+        : nullptr;
+    if (!m_pressHoldActive || !targetNode || m_scanInProgress) {
         cancelPressHold();
         return;
     }
@@ -2651,7 +2826,7 @@ void TreemapWidget::triggerPressHoldContextMenu()
     hideOwnedTooltip();
     m_contextMenuActive = true;
     emit nodeContextMenuRequested(
-        m_pressHoldNode,
+        targetNode,
         viewport()->mapToGlobal(m_pressHoldCurrentPos.toPoint()));
     m_contextMenuActive = false;
     clearHoverState(false);
@@ -2900,8 +3075,9 @@ void TreemapWidget::activateTouchTap(const QPointF& pos)
     }
 
     QRectF hitRect;
-    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect(), &hitRect);
-    if (hit && hit != m_current && !hit->isVirtual) {
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
+    FileNode* hit = hitTest(m_current, pos, -1, currentRootViewRect(), initialMatches, &hitRect);
+    if (hit && hit != m_current && !hit->isVirtual()) {
         if (nodeSupportsImagePreview(hit)) {
             m_lastActivationPos = pos;
             requestImagePreview(hit, hitRect);
@@ -3000,26 +3176,30 @@ FileNode* TreemapWidget::semanticFocusCandidateAt(const QPointF& pos, const QRec
         return nullptr;
     }
 
-    std::function<FileNode*(FileNode*, const QRectF&, int)> recurse =
-        [&](FileNode* node, const QRectF& nodeViewRect, int nodeDepth) -> FileNode* {
-            if (!node || !node->isDirectory || !nodeViewRect.contains(pos)) {
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
+
+    std::function<FileNode*(FileNode*, const QRectF&, int, bool)> recurse =
+        [&](FileNode* node, const QRectF& nodeViewRect, int nodeDepth, bool parentMatches) -> FileNode* {
+            if (!node || !node->isDirectory() || !nodeViewRect.contains(pos)) {
                 return nullptr;
             }
 
             FileNode* best = node;
-            if (nodeDepth >= (m_settings.baseVisibleDepth - 1)) {
+            if (!canPaintChildrenForDisplay(node, nodeViewRect, nodeDepth)) {
                 return best;
             }
+
+            const bool currentMatches = parentMatches || (effectiveMatchFlags(node) & 0x01);
 
             const QRectF contentArea = childPaintRectForNode(node, nodeViewRect);
             const QRectF contentClip = contentArea.adjusted(-1.0, -1.0, 1.0, 1.0);
             std::vector<std::pair<FileNode*, QRectF>> visibleChildren;
-            layoutVisibleChildren(node, nodeViewRect, contentArea, contentClip, visibleChildren);
+            layoutVisibleChildren(node, nodeViewRect, contentArea, contentClip, visibleChildren, currentMatches);
             for (const auto& [child, childViewRect] : visibleChildren) {
-                if (!child->isDirectory || !childViewRect.contains(pos)) {
+                if (!child->isDirectory() || !childViewRect.contains(pos)) {
                     continue;
                 }
-                if (FileNode* deeper = recurse(child, childViewRect, nodeDepth + 1)) {
+                if (FileNode* deeper = recurse(child, childViewRect, nodeDepth + 1, currentMatches)) {
                     best = deeper;
                 }
                 break;
@@ -3027,7 +3207,7 @@ FileNode* TreemapWidget::semanticFocusCandidateAt(const QPointF& pos, const QRec
             return best;
         };
 
-    FileNode* candidate = recurse(m_current, viewRect, depth);
+    FileNode* candidate = recurse(m_current, viewRect, (depth == -1) ? 0 : depth, initialMatches);
     return (candidate && candidate != m_current) ? candidate : nullptr;
 }
 
@@ -3064,6 +3244,7 @@ void TreemapWidget::notifyTreeChanged()
     m_nodeCount = 0;
     m_searchIndex.reset();
     cancelPendingFileTypeHighlight();
+    resetLiveRenderCache();
 
     clearIncrementalSearchState();
     clearHoverState(false);
@@ -3086,6 +3267,41 @@ void TreemapWidget::cancelPendingMetadata()
         m_metadataCancelToken->store(true, std::memory_order_relaxed);
     }
     m_metadataCancelToken = std::make_shared<std::atomic<bool>>(false);
+}
+
+void TreemapWidget::shutdownAsyncWorkers(bool waitForFinished)
+{
+    m_asyncShutdown = true;
+    m_metadataRestartPending = false;
+    m_pendingMetadataRoot = nullptr;
+    m_pendingMetadataArena.reset();
+    m_pendingFileTypeIndex.reset();
+    cancelPendingSearch();
+    cancelPendingMetadata();
+    cancelPendingFileTypeHighlight();
+
+    if (m_searchWatcher) {
+        disconnect(m_searchWatcher, nullptr, this, nullptr);
+        if (waitForFinished && m_searchWatcher->isRunning()) {
+            m_searchWatcher->waitForFinished();
+        }
+    }
+    if (m_metadataThread.joinable()) {
+        if (waitForFinished) {
+            m_metadataThread.join();
+        } else {
+            m_metadataThread.detach();
+        }
+    }
+    if (m_fileTypeWatcher) {
+        disconnect(m_fileTypeWatcher, nullptr, this, nullptr);
+        if (waitForFinished && m_fileTypeWatcher->isRunning()) {
+            m_fileTypeWatcher->waitForFinished();
+        }
+    }
+
+    m_metadataTaskRunning = false;
+    m_activeMetadataTaskId = 0;
 }
 
 void TreemapWidget::cancelPendingFileTypeHighlight()
@@ -3253,11 +3469,11 @@ void TreemapWidget::rebuildSearchMatches()
 
             // File type match (applies to files only; dirs always pass)
             const bool typeOk = fileTypeExtKeys.empty()
-                || (!node->isDirectory && fileTypeExtKeys.count(node->extKey) > 0);
+                || (!node->isDirectory() && fileTypeExtKeys.count(ColorUtils::packFileExt(node->name)) > 0);
 
             // Files/folders-only mode
-            const bool modeOk = (!filesOnly || !node->isDirectory)
-                && (!foldersOnly || node->isDirectory);
+            const bool modeOk = (!filesOnly || !node->isDirectory())
+                && (!foldersOnly || node->isDirectory());
 
             // Mark filter: matches if node (or any ancestor) has a mark in the filter set.
             bool markOk = markFilter.isEmpty() || markFilterMask == 0;
@@ -3372,25 +3588,28 @@ std::shared_ptr<SearchIndex> buildSearchIndex(FileNode* root)
         QString path;
     };
     std::vector<StackEntry> stack;
-    stack.push_back({root, root->absolutePath});
+    stack.push_back({root, root->computePath()});
     while (!stack.empty()) {
         StackEntry entry = stack.back();
         stack.pop_back();
         FileNode* node = entry.node;
-        if (!node || node->isVirtual) continue;
+        if (!node || node->isVirtual()) continue;
 
         node->id = index->nodeCount++;
         index->nodes.push_back(node);
-        index->pathCache.push_back(entry.path);
         index->nameOffsets.push_back(static_cast<uint32_t>(index->flatNames.size()));
         const QByteArray folded = node->name.toCaseFolded().toUtf8();
         index->nameLens.push_back(static_cast<uint16_t>(std::min<int>(folded.size(), 65535)));
         index->flatNames.append(folded.constData(), folded.size());
-        if (!node->isDirectory) {
-            index->filesByExt[node->extKey].push_back(node);
+        if (!node->isDirectory()) {
+            index->filesByExt[ColorUtils::packFileExt(node->name)].push_back(node);
         }
         const QString pathPrefix = entry.path.endsWith(QLatin1Char('/')) ? entry.path : entry.path + QLatin1Char('/');
-        for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
+        std::vector<FileNode*> children;
+        for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+            children.push_back(child);
+        }
+        for (auto it = children.rbegin(); it != children.rend(); ++it) {
             stack.push_back({*it, pathPrefix + (*it)->name});
         }
     }
@@ -3410,10 +3629,25 @@ void TreemapWidget::clearIncrementalSearchState()
 
 void TreemapWidget::rebuildSearchMetadataAsync()
 {
+    if (m_asyncShutdown) {
+        return;
+    }
+
     if (!m_root) {
+        cancelPendingMetadata();
+        cancelPendingSearch();
+        cancelPendingFileTypeHighlight();
+        m_metadataRestartPending = false;
+        m_pendingMetadataRoot = nullptr;
+        m_pendingMetadataArena.reset();
+        m_pendingFileTypeIndex.reset();
         m_nodeCount = 0;
         m_searchMatchCache = {};
+        m_fileTypeMatchCache = {};
+        m_combinedMatchCache = {};
+        m_searchReachCache = {};
         m_searchIndex.reset();
+        clearIncrementalSearchState();
         return;
     }
 
@@ -3427,100 +3661,179 @@ void TreemapWidget::rebuildSearchMetadataAsync()
     // be invalidated.
     clearIncrementalSearchState();
 
+    // Qt 6 race: QFutureInterface<T>::~QFutureInterface calls ResultStoreBase::clear<T>
+    // without holding the result-store mutex (M0), but the background task holds M0
+    // while writing into the result store via reportAndMoveResult. Calling setFuture
+    // while the previous task is in the narrow window between reportAndMoveResult
+    // completing and ~StoredFunctionCall decrementing the refcount triggers the race.
+    //
+    // Fix: never call setFuture while a task is in-flight. Instead, set a restart flag
+    // and let onMetadataTaskFinished restart us after the task (and its destructor) are
+    // fully done. The finished signal is queued, so by the time we handle it the
+    // thread-pool thread has already deleted the StoredFunctionCall.
+    if (m_metadataTaskRunning) {
+        m_metadataRestartPending = true;
+        return;
+    }
+
     FileNode* const root = m_root;
-    const std::shared_ptr<NodeArena> rootArena = m_rootArena;
-    const QString rootPath = root->absolutePath;
+    const std::shared_ptr<NodeArena> rootArena = m_snapshot ? m_snapshot->arena : nullptr;
+    const QString rootPath = m_snapshot ? m_snapshot->rootPath : QString();
     auto cancelToken = m_metadataCancelToken;
     // Snapshot marks on main thread; looked up by path inside the background task.
     const QHash<QString, FolderMark> colorMarkSnapshot = m_settings.folderColorMarks;
     const QHash<QString, FolderMark> iconMarkSnapshot  = m_settings.folderIconMarks;
 
-    m_metadataWatcher->setFuture(QtConcurrent::run(
-        [root, rootPath, rootArena, cancelToken, colorMarkSnapshot, iconMarkSnapshot]()
+    m_metadataTaskRunning = true;
+    m_pendingMetadataRoot = root;
+    m_pendingMetadataArena = rootArena;
+    const quint64 taskId = ++m_nextMetadataTaskId;
+    m_activeMetadataTaskId = taskId;
+    if (m_metadataThread.joinable()) {
+        m_metadataThread.join();
+    }
+    const QPointer<TreemapWidget> that(this);
+    m_metadataThread = std::thread([that, root, rootPath, rootArena, cancelToken,
+                                    colorMarkSnapshot, iconMarkSnapshot, taskId]() mutable {
+        auto index = [root, rootPath, rootArena, cancelToken, colorMarkSnapshot, iconMarkSnapshot]()
             -> std::shared_ptr<SearchIndex>
-    {
-        if (!rootArena) {
-            return {};
-        }
-        auto index = std::make_shared<SearchIndex>();
-        index->nodes.reserve(rootArena->totalAllocated());
-        index->pathCache.reserve(index->nodes.capacity());
-        index->nameOffsets.reserve(index->nodes.capacity());
-        index->nameLens.reserve(index->nodes.capacity());
-        index->markCache.reserve(index->nodes.capacity());
-        index->directMarkCache.reserve(index->nodes.capacity());
-
-        struct StackEntry {
-            FileNode* node;
-            QString path;
-            uint32_t inheritedMarks;
-        };
-        std::vector<StackEntry> stack;
-        stack.push_back({root, rootPath, 0u});
-
-        int i = 0;
-        while (!stack.empty()) {
-            if ((++i & 0xFFF) == 0 && cancelToken->load(std::memory_order_relaxed)) {
+        {
+            if (!rootArena) {
                 return {};
             }
-            StackEntry entry = stack.back();
-            stack.pop_back();
-            FileNode* node = entry.node;
-            if (!node || node->isVirtual) continue;
+            auto index = std::make_shared<SearchIndex>();
+            index->nodes.reserve(rootArena->totalAllocated());
+            index->nameOffsets.reserve(index->nodes.capacity());
+            index->nameLens.reserve(index->nodes.capacity());
+            index->markCache.reserve(index->nodes.capacity());
+            index->directMarkCache.reserve(index->nodes.capacity());
+            index->pendingColorMarks.reserve(index->nodes.capacity());
+            index->pendingIconMarks.reserve(index->nodes.capacity());
 
-            node->id = index->nodeCount++;
-            index->nodes.push_back(node);
-            index->pathCache.push_back(entry.path);
+            struct StackEntry {
+                FileNode* node;
+                QString path;
+                uint32_t inheritedMarks;
+            };
+            std::vector<StackEntry> stack;
+            stack.push_back({root, rootPath, 0u});
 
-            // Reset and apply direct marks
-            node->colorMark = 0;
-            node->iconMark = 0;
-            uint32_t directMarks = 0;
-            if (node->isDirectory) {
-                auto itColor = colorMarkSnapshot.constFind(entry.path);
-                if (itColor != colorMarkSnapshot.constEnd()) {
-                    const FolderMark m = itColor.value();
-                    node->colorMark = static_cast<uint8_t>(m);
-                    directMarks |= (1u << static_cast<int>(m));
+            int i = 0;
+            while (!stack.empty()) {
+                if ((++i & 0xFFF) == 0 && cancelToken->load(std::memory_order_relaxed)) {
+                    return {};
                 }
-                auto itIcon = iconMarkSnapshot.constFind(entry.path);
-                if (itIcon != iconMarkSnapshot.constEnd()) {
-                    const FolderMark m = itIcon.value();
-                    node->iconMark = static_cast<uint8_t>(m);
-                    directMarks |= (1u << static_cast<int>(m));
+                StackEntry entry = stack.back();
+                stack.pop_back();
+                FileNode* node = entry.node;
+                if (!node || node->isVirtual()) continue;
+
+                index->nodeCount++;
+                index->nodes.push_back(node);
+
+                // Compute marks but do NOT write to FileNode fields here — paintNode
+                // reads colorMark/iconMark/id on the main thread concurrently.
+                // Store them in the index and apply in onMetadataTaskFinished instead.
+                index->pendingColorMarks.push_back(0);
+                index->pendingIconMarks.push_back(0);
+                uint32_t directMarks = 0;
+                if (node->isDirectory()) {
+                    auto itColor = colorMarkSnapshot.constFind(entry.path);
+                    if (itColor != colorMarkSnapshot.constEnd()) {
+                        const FolderMark m = itColor.value();
+                        index->pendingColorMarks.back() = static_cast<uint8_t>(m);
+                        directMarks |= (1u << static_cast<int>(m));
+                    }
+                    auto itIcon = iconMarkSnapshot.constFind(entry.path);
+                    if (itIcon != iconMarkSnapshot.constEnd()) {
+                        const FolderMark m = itIcon.value();
+                        index->pendingIconMarks.back() = static_cast<uint8_t>(m);
+                        directMarks |= (1u << static_cast<int>(m));
+                    }
+                }
+
+                const uint32_t currentMarks = entry.inheritedMarks | directMarks;
+                index->markCache.push_back(currentMarks);
+                index->directMarkCache.push_back(directMarks);
+
+                index->nameOffsets.push_back(static_cast<uint32_t>(index->flatNames.size()));
+                const QByteArray folded = node->name.toCaseFolded().toUtf8();
+                index->nameLens.push_back(static_cast<uint16_t>(std::min<int>(folded.size(), 65535)));
+                index->flatNames.append(folded.constData(), folded.size());
+                if (!node->isDirectory()) {
+                    index->filesByExt[ColorUtils::packFileExt(node->name)].push_back(node);
+                }
+
+                const QString pathPrefix = entry.path.endsWith(QLatin1Char('/')) ? entry.path : entry.path + QLatin1Char('/');
+                std::vector<FileNode*> children;
+                for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+                    children.push_back(child);
+                }
+                for (auto it = children.rbegin(); it != children.rend(); ++it) {
+                    FileNode* child = *it;
+                    if (!child) continue;
+                    QString childPath = pathPrefix + child->name;
+                    stack.push_back({child, childPath, currentMarks});
                 }
             }
 
-            const uint32_t currentMarks = entry.inheritedMarks | directMarks;
-            index->markCache.push_back(currentMarks);
-            index->directMarkCache.push_back(directMarks);
-
-            index->nameOffsets.push_back(static_cast<uint32_t>(index->flatNames.size()));
-            const QByteArray folded = node->name.toCaseFolded().toUtf8();
-            index->nameLens.push_back(static_cast<uint16_t>(std::min<int>(folded.size(), 65535)));
-            index->flatNames.append(folded.constData(), folded.size());
-            if (!node->isDirectory) {
-                index->filesByExt[node->extKey].push_back(node);
-            }
-
-            const QString pathPrefix = entry.path.endsWith(QLatin1Char('/')) ? entry.path : entry.path + QLatin1Char('/');
-            for (auto it = node->children.rbegin(); it != node->children.rend(); ++it) {
-                FileNode* child = *it;
-                if (!child) continue;
-                QString childPath = pathPrefix + child->name;
-                stack.push_back({child, childPath, currentMarks});
-            }
+            index->arenaOwner = rootArena;
+            return index;
+        }();
+        if (!qApp) {
+            return;
         }
-
-        index->arenaOwner = rootArena;
-        return index;
-    }));
+        QMetaObject::invokeMethod(
+            qApp,
+            [that, index = std::move(index), root, rootArena, taskId]() mutable {
+                if (that) {
+                    that->onMetadataTaskFinished(std::move(index), root, std::move(rootArena), taskId);
+                }
+            },
+            Qt::QueuedConnection);
+    });
 }
 
-void TreemapWidget::onMetadataTaskFinished()
+void TreemapWidget::onMetadataTaskFinished(std::shared_ptr<SearchIndex> index,
+                                           FileNode* expectedRoot,
+                                           std::shared_ptr<NodeArena> expectedArena,
+                                           quint64 taskId)
 {
-    const std::shared_ptr<SearchIndex> index = m_metadataWatcher->result();
+    if (m_asyncShutdown) {
+        return;
+    }
+
+    if (m_metadataThread.joinable()) {
+        m_metadataThread.join();
+    }
+    if (taskId != m_activeMetadataTaskId) {
+        return;
+    }
+
+    m_metadataTaskRunning = false;
+
+    // A newer root arrived while this task was running (see rebuildSearchMetadataAsync).
+    // Restart with current state; skip the stale result from this task.
+    if (m_metadataRestartPending) {
+        m_metadataRestartPending = false;
+        rebuildSearchMetadataAsync();
+        return;
+    }
+
     if (!index) return; // cancelled
+    if (m_root != expectedRoot || !m_snapshot || m_snapshot->arena != expectedArena) {
+        return;
+    }
+
+    // Apply FileNode field writes on the main thread so they don't race with
+    // paintNode reading id/colorMark/iconMark. The background task staged these
+    // in pendingColorMarks/pendingIconMarks rather than writing directly.
+    for (uint32_t i = 0; i < index->nodeCount; ++i) {
+        FileNode* node = index->nodes[i];
+        node->id = i;
+        node->setColorMark(index->pendingColorMarks[i]);
+        node->setIconMark(index->pendingIconMarks[i]);
+    }
 
     m_nodeCount = index->nodeCount;
     m_searchMatchCache.assign(m_nodeCount, 0);
@@ -3555,6 +3868,7 @@ void TreemapWidget::rebuildFileTypeMatchesAsync()
     const QString highlightedType = m_highlightedFileType;
     auto index = m_searchIndex;
     auto cancelToken = m_fileTypeCancelToken;
+    m_pendingFileTypeIndex = index;
     m_pendingHighlightedFileType = highlightedType;
     emit fileTypeHighlightBusyChanged(true);
 
@@ -3582,7 +3896,7 @@ void TreemapWidget::rebuildFileTypeMatchesAsync()
                     result.cancelled = true;
                     return result;
                 }
-                if (node->isVirtual || (node->parent && node->parent->isVirtual)) {
+                if (node->isVirtual() || (node->parent && node->parent->isVirtual())) {
                     if (node->id < result.matchCache.size()) {
                         result.matchCache[node->id] |= kTypeSelfMatch;
                     }
@@ -3618,8 +3932,15 @@ void TreemapWidget::rebuildFileTypeMatchesAsync()
 
 void TreemapWidget::onFileTypeMatchTaskFinished()
 {
+    if (m_asyncShutdown) {
+        return;
+    }
+
     emit fileTypeHighlightBusyChanged(false);
     if (m_pendingHighlightedFileType != m_highlightedFileType) {
+        return;
+    }
+    if (m_pendingFileTypeIndex != m_searchIndex) {
         return;
     }
 
@@ -3655,7 +3976,7 @@ void TreemapWidget::rebuildCombinedMatchCache()
     // Pass 2: mark combined self-matches. Only files can be direct combined matches
     // (directories are never typed), so directories are handled entirely by pass 3.
     for (FileNode* node : m_searchIndex->nodes) {
-        if (node->isDirectory || node->id >= m_nodeCount) continue;
+        if (node->isDirectory() || node->id >= m_nodeCount) continue;
         if ((m_fileTypeMatchCache[node->id] & kTypeSelfMatch)
             && node->id < searchReach.size() && searchReach[node->id])
             m_combinedMatchCache[node->id] = kTypeSelfMatch;
@@ -3708,13 +4029,28 @@ bool TreemapWidget::isDescendantOf(const FileNode* node, const FileNode* ancesto
 
 void TreemapWidget::sortChildrenBySize(FileNode* node)
 {
-    if (!node) return;
-    std::sort(node->children.begin(), node->children.end(),
+    if (!node || !node->firstChild) return;
+
+    std::vector<FileNode*> children;
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        children.push_back(child);
+    }
+
+    std::sort(children.begin(), children.end(),
               [](const FileNode* a, const FileNode* b) {
-                  return a->size > b->size;
+                  if (a->displaySize != b->displaySize) {
+                      return a->displaySize > b->displaySize;
+                  }
+                  return a->name < b->name;
               });
-    for (FileNode* child : node->children)
-        sortChildrenBySize(child);
+
+    node->firstChild = children.front();
+    for (size_t i = 0; i < children.size() - 1; ++i) {
+        children[i]->nextSibling = children[i+1];
+        sortChildrenBySize(children[i]);
+    }
+    children.back()->nextSibling = nullptr;
+    sortChildrenBySize(children.back());
 }
 
 QString TreemapWidget::cachedSizeLabel(const FileNode* node) const
@@ -3728,7 +4064,7 @@ QString TreemapWidget::cachedSizeLabel(const FileNode* node) const
         return *it;
     }
 
-    const QString label = m_systemLocale.formattedDataSize(node->size);
+    const QString label = m_systemLocale.formattedDataSize(nodeDisplaySize(node));
     if (m_sizeLabelCache.size() > kMaxCacheEntries)
         m_sizeLabelCache.clear();
     m_sizeLabelCache.insert(node, label);
@@ -3794,13 +4130,47 @@ QString TreemapWidget::cachedElidedLabelWithBucket(const FileNode* node, const Q
     return elided;
 }
 
+TreemapWidget::FilteredChildren TreemapWidget::computeFilteredChildren(FileNode* node, bool parentMatches) const
+{
+    FilteredChildren result;
+    if (!node) return result;
+
+    for (FileNode* child = node->firstChild; child; child = child->nextSibling) {
+        const qint64 childSize = nodeLayoutSize(child);
+        if (childSize > 0) {
+            if (!node->isVirtual() && child->isVirtual()) {
+                result.freeChildren.push_back(child);
+                result.freeTotal += childSize;
+            } else {
+                result.children.push_back(child);
+            }
+            result.total += childSize;
+        }
+    }
+
+    // When "hide non-matching" is active, exclude children with no match from layout.
+    if (m_filterParams.hideNonMatching && m_filterParams.isActive()) {
+        // Include children if they match, OR if this node (or any ancestor) is a direct match.
+        if (!parentMatches) {
+            result.children.erase(std::remove_if(result.children.begin(), result.children.end(),
+                [this](const FileNode* c) { return effectiveMatchFlags(c) == 0; }),
+                result.children.end());
+            result.total = 0;
+            for (const auto* c : result.children) result.total += nodeLayoutSize(c);
+            for (const auto* c : result.freeChildren) result.total += nodeLayoutSize(c);
+        }
+    }
+    return result;
+}
+
 void TreemapWidget::layoutVisibleChildren(FileNode* node, const QRectF& tileViewRect,
                                           const QRectF& viewContent,
                                           const QRectF& visibleClip,
-                                          std::vector<std::pair<FileNode*, QRectF>>& out) const
+                                          std::vector<std::pair<FileNode*, QRectF>>& out,
+                                          bool parentMatches) const
 {
     out.clear();
-    if (!node || !node->isDirectory || node->children.empty()
+    if (!node || !node->isDirectory() || !node->firstChild
             || viewContent.width() <= 0.0 || viewContent.height() <= 0.0) {
         return;
     }
@@ -3815,33 +4185,11 @@ void TreemapWidget::layoutVisibleChildren(FileNode* node, const QRectF& tileView
         // on every subsequent call, only scaling to the current viewContent
         // dimensions.  This locks in split directions on first render so they
         // can never flip during a zoom animation.
-        std::vector<FileNode*> children;
-        std::vector<FileNode*> freeChildren;
-        qint64 total = 0;
-        qint64 freeTotal = 0;
-        for (const auto& child : node->children) {
-            if (child->size > 0) {
-                if (!node->isVirtual && child->isVirtual) {
-                    freeChildren.push_back(child);
-                    freeTotal += child->size;
-                } else {
-                    children.push_back(child);
-                }
-                total += child->size;
-            }
-        }
-        // When "hide non-matching" is active, exclude children with no match from layout.
-        if (m_filterParams.hideNonMatching && m_filterParams.isActive()) {
-            // Include children if they match, OR if this node (or any ancestor) is a direct match.
-            if (!isDescendantOfDirectMatch(node)) {
-                children.erase(std::remove_if(children.begin(), children.end(),
-                    [this](const FileNode* c) { return effectiveMatchFlags(c) == 0; }),
-                    children.end());
-                total = 0;
-                for (const auto* c : children) total += c->size;
-                for (const auto* c : freeChildren) total += c->size;
-            }
-        }
+        FilteredChildren filtered = computeFilteredChildren(node, parentMatches);
+        std::vector<FileNode*>& children = filtered.children;
+        std::vector<FileNode*>& freeChildren = filtered.freeChildren;
+        qint64 total = filtered.total;
+        qint64 freeTotal = filtered.freeTotal;
 
         if ((children.empty() && freeChildren.empty()) || total <= 0) {
             return;
@@ -3849,15 +4197,15 @@ void TreemapWidget::layoutVisibleChildren(FileNode* node, const QRectF& tileView
 
         std::sort(children.begin(), children.end(),
                   [](const FileNode* a, const FileNode* b) {
-                      if (a->size != b->size) {
-                          return a->size > b->size;
+                      if (a->displaySize != b->displaySize) {
+                          return a->displaySize > b->displaySize;
                       }
                       return a->name < b->name;
                   });
         std::sort(freeChildren.begin(), freeChildren.end(),
                   [](const FileNode* a, const FileNode* b) {
-                      if (a->size != b->size) {
-                          return a->size > b->size;
+                      if (a->displaySize != b->displaySize) {
+                          return a->displaySize > b->displaySize;
                       }
                       return a->name < b->name;
                   });
@@ -3924,10 +4272,10 @@ void TreemapWidget::layoutVisibleChildren(FileNode* node, const QRectF& tileView
                 layoutRect.setHeight(layoutRect.height() - h);
             }
 
-            squarifiedLayout(freeChildren, freeRect, freeTotal, normalized);
+            squarifiedLayout(freeChildren, freeRect, freeTotal, normalized, true);
         }
-        
-        squarifiedLayout(children, layoutRect, total - freeTotal, normalized);
+
+        squarifiedLayout(children, layoutRect, total - freeTotal, normalized, true);
         cacheIt = m_liveSplitCache.insert(node, SplitCacheEntry{ar, std::move(normalized)});
     }
 
@@ -4082,13 +4430,15 @@ QSizeF TreemapWidget::stabilizedNodeSize(const FileNode* node, StableMetricChann
 
 bool TreemapWidget::canPaintChildrenForDisplay(const FileNode* node, const QRectF& viewBounds, int depth) const
 {
-    if (depth >= m_activeSemanticDepth) {
+    const int visibleDepthLimit = std::max(0, m_activeSemanticDepth - 1);
+    if (depth >= visibleDepthLimit) {
         // If "hide non-matching" is active, we allow recursing much deeper because 
         // the number of items is restricted by the filter.
         if (!(m_filterParams.hideNonMatching && m_searchActive)) {
             return false;
         }
-        if (depth >= m_settings.maxSemanticDepth) {
+        const int maxDepthLimit = std::max(0, m_settings.maxSemanticDepth - 1);
+        if (depth >= maxDepthLimit) {
             return false;
         }
     }
@@ -4131,8 +4481,9 @@ qreal TreemapWidget::childRevealOpacityForLayout(const FileNode* node, const QRe
     const qreal sizeFade = tileRevealOpacityForNode(node, layoutArea);
 
     qreal semanticFade = 1.0;
-    if (childDepth > m_settings.baseVisibleDepth) {
-        const qreal revealDepth = m_settings.baseVisibleDepth
+    const qreal baseRevealDepth = std::max(0, m_settings.baseVisibleDepth - 1);
+    if (childDepth > baseRevealDepth) {
+        const qreal revealDepth = baseRevealDepth
             + std::max<qreal>(0.0,
                               std::log2(std::max<qreal>(1.0, m_cameraScale))
                                   * m_settings.depthRevealPerZoomDoubling);
@@ -4256,6 +4607,12 @@ bool TreemapWidget::continuousZoomGeometryActive() const
         || m_continuousZoomSettleFramesRemaining > 0;
 }
 
+bool TreemapWidget::navigationAnimationInProgress() const
+{
+    return m_zoomAnimation.state() == QAbstractAnimation::Running
+        || m_cameraAnimation.state() == QAbstractAnimation::Running;
+}
+
 void TreemapWidget::resetCamera()
 {
     m_cameraScale = 1.0;
@@ -4367,12 +4724,14 @@ void TreemapWidget::drawScene(QPainter& painter, FileNode* root, const QRectF& v
     m_framePalette = palette();
     m_framePixelScale   = pixelScale();
     m_frameOutlineWidth = snapLengthToPixels(m_settings.border, m_framePixelScale);
+    m_frameImagePreviewNode = currentImagePreviewNode();
 
     // The current folder owns the full viewport. Descendant geometry is derived
     // recursively from that root-bleed rect, clipped to the requested visible area.
     const QRectF clip = visibleClip.isValid() ? visibleClip : QRectF(full);
     painter.setClipRect(full, Qt::IntersectClip);
-    paintNode(painter, root, -1, clip, currentRootViewRect(), 0.0, 0.0, true, layer);
+    const bool initialMatches = isDescendantOfDirectMatch(root);
+    paintNode(painter, root, -1, clip, currentRootViewRect(), 0.0, 0.0, true, initialMatches, layer);
 }
 
 void TreemapWidget::drawSceneScaled(QPainter& painter, FileNode* root, const QRectF& targetRect, qreal opacity)
@@ -4402,9 +4761,10 @@ void TreemapWidget::drawMatchOverlay(QPainter& painter, FileNode* root, const QR
     const QRectF clip = visibleClip.isValid() ? visibleClip : QRectF(viewport()->rect());
 
     const bool drawBorders = !(m_filterParams.hideNonMatching && m_searchActive);
+    const bool initialMatches = isDescendantOfDirectMatch(root);
     painter.save();
     painter.setPen(Qt::NoPen);
-    paintMatchOverlayNode(painter, root, -1, clip, currentRootViewRect(), drawBorders);
+    paintMatchOverlayNode(painter, root, -1, clip, currentRootViewRect(), drawBorders, initialMatches);
     painter.restore();
 }
 
@@ -4506,7 +4866,7 @@ void TreemapWidget::startZoomAnimation(const QPixmap& previousFrame,
 }
 
 bool TreemapWidget::findVisibleViewRect(FileNode* root, const QRectF& rootViewRect,
-                                        FileNode* target, QRectF* outRect, int depth) const
+                                        FileNode* target, QRectF* outRect, int depth, bool parentMatches) const
 {
     if (!root || !target || !outRect || !rootViewRect.isValid() || rootViewRect.isEmpty()) {
         return false;
@@ -4516,11 +4876,13 @@ bool TreemapWidget::findVisibleViewRect(FileNode* root, const QRectF& rootViewRe
         return false;
     }
 
+    const bool currentMatches = parentMatches || (effectiveMatchFlags(root) & 0x01);
+
     const QRectF contentArea = childPaintRectForNode(root, rootViewRect);
     const QRectF contentClip = contentArea.adjusted(-1.0, -1.0, 1.0, 1.0);
 
     std::vector<std::pair<FileNode*, QRectF>> visibleChildren;
-    layoutVisibleChildren(root, rootViewRect, contentArea, contentClip, visibleChildren);
+    layoutVisibleChildren(root, rootViewRect, contentArea, contentClip, visibleChildren, currentMatches);
     for (const auto& [child, childViewRect] : visibleChildren) {
         if (childViewRect.width() < m_settings.minPaint || childViewRect.height() < m_settings.minPaint) {
             continue;
@@ -4529,10 +4891,10 @@ bool TreemapWidget::findVisibleViewRect(FileNode* root, const QRectF& rootViewRe
             *outRect = snapRectToPixels(childViewRect, pixelScale());
             return true;
         }
-        if (!child->isDirectory) {
+        if (!child->isDirectory()) {
             continue;
         }
-        if (findVisibleViewRect(child, childViewRect, target, outRect, depth + 1)) {
+        if (findVisibleViewRect(child, childViewRect, target, outRect, depth + 1, currentMatches)) {
             return true;
         }
     }
@@ -4545,12 +4907,14 @@ bool TreemapWidget::findVisibleViewRect(FileNode* root, const QRectF& rootViewRe
 void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                               const QRectF& visibleClip, const QRectF& viewRect,
                               qreal subtreeHoverBlend, qreal subtreePrevHoverBlend,
-                              bool applyOwnReveal, SceneRenderLayer layer)
+                              bool applyOwnReveal, bool parentMatches, SceneRenderLayer layer)
 {
     const QRectF r = viewRect;
     const QRectF effectiveClip = r.intersected(visibleClip);
     if (r.width() < m_settings.minPaint || r.height() < m_settings.minPaint || effectiveClip.isEmpty())
         return;
+
+    const bool currentMatches = parentMatches || (effectiveMatchFlags(node) & 0x01);
 
     const bool liveCameraAnimating = continuousZoomGeometryActive();
     const QRectF ri = liveCameraAnimating ? r : snapRectToPixels(r, m_framePixelScale);
@@ -4570,12 +4934,12 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
     // Compute child subtree hover blends once — passed down to every child call.
     // If this node IS the hovered directory, its children receive the hover blend;
     // otherwise the parent's inherited blend passes through unchanged.
-    const qreal childSubtreeHoverBlend = (node == m_hovered && m_hovered && m_hovered->isDirectory)
+    const qreal childSubtreeHoverBlend = (node == m_hovered && m_hovered && m_hovered->isDirectory())
         ? m_hoverBlend : subtreeHoverBlend;
-    const qreal childSubtreePrevHoverBlend = (node == m_previousHovered && m_previousHovered && m_previousHovered->isDirectory)
+    const qreal childSubtreePrevHoverBlend = (node == m_previousHovered && m_previousHovered && m_previousHovered->isDirectory())
         ? (1.0 - m_hoverBlend) : subtreePrevHoverBlend;
 
-    if (node->isDirectory) {
+    if (node->isDirectory()) {
         const qreal tileRevealOpacity = (node == m_current || !applyOwnReveal)
             ? 1.0
             : tileRevealOpacityForNode(node, r);
@@ -4618,14 +4982,31 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             p.setClipRect(state.childPaintRect, Qt::IntersectClip);
 
             std::vector<std::pair<FileNode*, QRectF>> visibleChildren;
-            layoutVisibleChildren(node, r, state.childLayoutRect, state.childContentClip, visibleChildren);
+            layoutVisibleChildren(node, r, state.childLayoutRect, state.childContentClip, visibleChildren, currentMatches);
             for (const auto& [child, childRect] : visibleChildren) {
                 if (!childRect.intersects(state.childContentClip)) {
                     continue;
                 }
 
-                const qreal childRevealOpacity = tileRevealOpacityForNode(child, childRect);
-                const qreal childTinyOpacity = tinyChildRevealOpacityForLayout(child, childRect);
+                const int childDepth = depth + 1;
+                qreal childSemanticOpacity = 1.0;
+                const qreal baseRevealDepth = std::max(0, m_settings.baseVisibleDepth - 1);
+                if (childDepth > baseRevealDepth) {
+                    const qreal revealDepth = baseRevealDepth
+                        + std::max<qreal>(0.0,
+                                          std::log2(std::max<qreal>(1.0, m_cameraScale))
+                                              * m_settings.depthRevealPerZoomDoubling);
+                    childSemanticOpacity = smoothstep(
+                        std::clamp(revealDepth - childDepth, 0.0, 1.0));
+                }
+                if (childSemanticOpacity <= 0.0) {
+                    continue;
+                }
+
+                const qreal childRevealOpacity = std::min(
+                    tileRevealOpacityForNode(child, childRect), childSemanticOpacity);
+                const qreal childTinyOpacity = std::min(
+                    tinyChildRevealOpacityForLayout(child, childRect), childSemanticOpacity);
 
                 // Use the maximum reveal opacity for the background fill to ensure a single,
                 // continuous, non-popping base color for both tiny and detailed versions.
@@ -4651,7 +5032,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                 // can use our gamma-correct blendColors() instead of the muddy sRGB
                 // alpha-blending provided by QPainter.
                 QColor baseFill = fc;
-                if (child->isDirectory) {
+                if (child->isDirectory()) {
                     const qreal childNodeHighlightStrength = childNodeHoverStrength * highlightOpacity;
                     baseFill = childNodeHighlightStrength > 0.0
                         ? blendColors(fc, hoverBase, childNodeHighlightStrength)
@@ -4663,7 +5044,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                 // For file tiles, always pre-composite the fill colour against the
                 // panel background using gamma-correct blending.  opaqueCompositeColor
                 // is a no-op for fully-opaque colours, so this handles both cases.
-                const QColor effectiveFillColor = child->isDirectory
+                const QColor effectiveFillColor = child->isDirectory()
                     ? fillColor
                     : opaqueCompositeColor(childBackgroundColor, fillColor);
 
@@ -4680,7 +5061,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                     p.save();
                     p.setOpacity(baseOpacity * tileRevealOpacity * childRevealOpacity);
                     paintNode(p, child, depth + 1, state.childContentClip, childRect,
-                              childSubtreeHoverBlend, childSubtreePrevHoverBlend, false, layer);
+                              childSubtreeHoverBlend, childSubtreePrevHoverBlend, false, currentMatches, layer);
                     p.restore();
                 }
             }
@@ -4822,7 +5203,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                                         layoutDirection()),
                                     m_headerFont, m_headerFm, headerTextColor, m_framePixelScale,
                                     layoutDirection(),
-                                    static_cast<FolderMark>(node->iconMark));
+                                    static_cast<FolderMark>(node->iconMark()));
                 }
             }
             p.restore();
@@ -4863,7 +5244,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
         const qreal bgHighlightStrength = std::max(nodeHighlightStrength, subtreeHighlightStrength);
         QColor fillColor = bgHighlightStrength > 0.0
             ? blendColors(fc, hoverBase, bgHighlightStrength) : fc;
-        if (fillColor.alphaF() < 1.0 && node->parent && node->parent->isDirectory) {
+        if (fillColor.alphaF() < 1.0 && node->parent && node->parent->isDirectory()) {
             const QColor parentBase = QColor::fromRgba(node->parent->color);
             const QColor parentPanelBase = cachedPanelBase(parentBase, m_framePalette.color(QPalette::Base));
             const QColor parentFillColor = subtreeHighlightStrength > 0.0
@@ -4892,9 +5273,9 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             thumbStartSize,
             thumbFullSize,
             thumbFullSize);
-        const bool isVideoNode = supportedVideoExtKeys().contains(node->extKey);
+        const bool isVideoNode = supportedVideoExtKeys().contains(ColorUtils::packFileExt(node->name));
         if (m_settings.showThumbnails && thumbnailRevealOpacity > 0.0
-                && (supportedImageExtKeys().contains(node->extKey)
+                && (supportedImageExtKeys().contains(ColorUtils::packFileExt(node->name))
                     || (isVideoNode && m_settings.showVideoThumbnails))) {
             const QString path = nodePath(node);
             if (!path.isEmpty()) {
@@ -4970,7 +5351,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                 : fileBorderBase;
 
             QColor effectiveFileBorderColor = fileBorderColor;
-            if (!m_settings.randomColorForUnknownFiles && fc.alphaF() < 1.0 && node->parent && node->parent->isDirectory) {
+            if (!m_settings.randomColorForUnknownFiles && fc.alphaF() < 1.0 && node->parent && node->parent->isDirectory()) {
                 const QColor parentBase = QColor::fromRgba(node->parent->color);
                 const QColor parentPanelBase = cachedPanelBase(parentBase, m_framePalette.color(QPalette::Base));
                 const QColor parentPanelColor = subtreeHighlightStrength > 0.0
@@ -5009,7 +5390,7 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
             (stableWidth - hideWidth) / widthSpan, 0.0, 1.0));
         const qreal oneLineHeightFade = smoothstep(std::clamp(
             (stableHeight - hideHeight) / oneLineHeightSpan, 0.0, 1.0));
-        const qreal previewLabelFade = (node == m_imagePreviewNode)
+        const qreal previewLabelFade = (node == m_frameImagePreviewNode)
             ? std::clamp(1.0 - smoothstep(std::clamp(m_imagePreviewProgress, 0.0, 1.0)), 0.0, 1.0)
             : 1.0;
         const qreal textFade = std::min(widthFade, oneLineHeightFade) * previewLabelFade;
@@ -5095,13 +5476,29 @@ void TreemapWidget::paintNode(QPainter& p, FileNode* node, int depth,
                                   layoutDirection());
             }
         }
+
+        // Hard link badge: small chain icon in top-right corner for files with nlink > 1.
+        if (node->hasHardLinks() && ri.width() >= 16.0 && ri.height() >= 16.0
+                && layer != SceneRenderLayer::StaticOnly) {
+            constexpr qreal kBadgeSize = 13.0;
+            const QColor textColor = contrastingTextColor(fillColor);
+            const QIcon badge = makeRecoloredSvgIcon(
+                QStringLiteral(":/assets/tabler-icons/link.svg"), textColor);
+            const QRectF badgeRect(
+                ri.right() - outlineWidth - kBadgeSize - 1.0,
+                ri.top() + outlineWidth + 1.0,
+                kBadgeSize, kBadgeSize);
+            p.setOpacity(baseOpacity * tileRevealOpacity * 0.65);
+            badge.paint(&p, badgeRect.toRect(), Qt::AlignCenter);
+        }
+
         p.restore();
     }
 }
 
 void TreemapWidget::paintMatchOverlayNode(QPainter& painter, FileNode* node, int depth,
                                           const QRectF& visibleClip, const QRectF& viewRect,
-                                          bool drawBorders) const
+                                          bool drawBorders, bool parentMatches) const
 {
     if (!node) return;
 
@@ -5112,7 +5509,7 @@ void TreemapWidget::paintMatchOverlayNode(QPainter& painter, FileNode* node, int
         return;
 
     const quint8 eFlags = effectiveMatchFlags(node);
-    const bool matched = (eFlags != 0);
+    const bool matched = parentMatches || (eFlags != 0);
     const bool isViewRoot = (node == m_current);
 
     // Don't dim the root while the first async result is still in flight — prevents brief flicker.
@@ -5147,11 +5544,12 @@ void TreemapWidget::paintMatchOverlayNode(QPainter& painter, FileNode* node, int
         return;
     }
 
-    if (!node->isDirectory) return;  // File match: stays clear.
+    if (!node->isDirectory()) return;  // File match: stays clear.
 
     if (!canPaintChildrenForDisplay(node, r, depth)) return;
 
     const bool directMatch = (eFlags & kTypeSelfMatch);
+    const bool currentMatches = parentMatches || directMatch;
 
     QRectF contentLayout;
     QRectF contentClip;
@@ -5168,7 +5566,7 @@ void TreemapWidget::paintMatchOverlayNode(QPainter& painter, FileNode* node, int
     }
 
     std::vector<std::pair<FileNode*, QRectF>> visibleChildren;
-    layoutVisibleChildren(node, r, contentLayout, contentClip, visibleChildren);
+    layoutVisibleChildren(node, r, contentLayout, contentClip, visibleChildren, currentMatches);
 
     // Dim children that have no match; recurse into those that do.
     // Skip dimming when this folder is itself a direct pattern match (its contents stay clear).
@@ -5178,11 +5576,11 @@ void TreemapWidget::paintMatchOverlayNode(QPainter& painter, FileNode* node, int
         const QRectF childClip = childRect.intersected(contentClip);
         if (childClip.isEmpty()) continue;
 
-        if (effectiveMatchFlags(child) == 0) {
+        if (!currentMatches && effectiveMatchFlags(child) == 0) {
             if (shouldDimChildren)
                 painter.fillRect(snapRectToPixels(childClip, devicePixelScale), panelFadeColor);
         } else {
-            paintMatchOverlayNode(painter, child, depth + 1, childClip, childRect, drawBorders);
+            paintMatchOverlayNode(painter, child, depth + 1, childClip, childRect, drawBorders, currentMatches);
         }
     }
 }
@@ -5485,6 +5883,7 @@ void TreemapWidget::paintEvent(QPaintEvent* event)
     }
 
     paintImagePreviewOverlay(painter);
+    paintLaunchAnimations(painter);
 
     if (m_continuousZoomSettleFramesRemaining > 0
             && m_cameraAnimation.state() != QAbstractAnimation::Running) {
@@ -5499,16 +5898,16 @@ void TreemapWidget::paintEvent(QPaintEvent* event)
 
 FileNode* TreemapWidget::hitTestChildren(FileNode* node, const QPointF& pos, int depth,
                                          const QRectF& tileViewRect, const QRectF& contentArea,
-                                         const QRectF& visibleClip,
+                                         const QRectF& visibleClip, bool parentMatches,
                                          QRectF* outRect) const
 {
     std::vector<std::pair<FileNode*, QRectF>> visibleChildren;
-    layoutVisibleChildren(node, tileViewRect, contentArea, visibleClip, visibleChildren);
+    layoutVisibleChildren(node, tileViewRect, contentArea, visibleClip, visibleChildren, parentMatches);
     for (const auto& [child, childViewRect] : visibleChildren) {
         if (!childViewRect.contains(pos)) {
             continue;
         }
-        FileNode* hit = hitTest(child, pos, depth + 1, childViewRect, outRect);
+        FileNode* hit = hitTest(child, pos, depth + 1, childViewRect, parentMatches, outRect);
         if (hit) {
             return hit;
         }
@@ -5517,10 +5916,12 @@ FileNode* TreemapWidget::hitTestChildren(FileNode* node, const QPointF& pos, int
 }
 
 FileNode* TreemapWidget::hitTest(FileNode* node, const QPointF& pos, int depth,
-                                 const QRectF& viewRect, QRectF* outRect) const
+                                 const QRectF& viewRect, bool parentMatches, QRectF* outRect) const
 {
     if (!node || !viewRect.contains(pos))
         return nullptr;
+
+    const bool currentMatches = parentMatches || (effectiveMatchFlags(node) & 0x01);
 
     if (!canPaintChildrenForDisplay(node, viewRect, depth)) {
         if (outRect) {
@@ -5531,7 +5932,7 @@ FileNode* TreemapWidget::hitTest(FileNode* node, const QPointF& pos, int depth,
 
     const QRectF contentArea = childPaintRectForNode(node, viewRect);
     const QRectF contentClip = contentArea.adjusted(-0.75, -0.75, 0.75, 0.75);
-    if (FileNode* hit = hitTestChildren(node, pos, depth, viewRect, contentArea, contentClip, outRect)) {
+    if (FileNode* hit = hitTestChildren(node, pos, depth, viewRect, contentArea, contentClip, currentMatches, outRect)) {
         return hit;
     }
     if (outRect) {
@@ -5545,7 +5946,7 @@ FileNode* TreemapWidget::hitTest(FileNode* node, const QPointF& pos, int depth,
 void TreemapWidget::mouseMoveEvent(QMouseEvent* event)
 {
     if (!m_current) return;
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         event->accept();
         return;
     }
@@ -5593,7 +5994,7 @@ void TreemapWidget::mousePressEvent(QMouseEvent* event)
         return;
     }
 
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         if (event->button() == Qt::LeftButton) {
             closeImagePreview(true);
             event->accept();
@@ -5632,7 +6033,7 @@ void TreemapWidget::mousePressEvent(QMouseEvent* event)
 
 void TreemapWidget::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         event->accept();
         return;
     }
@@ -5651,21 +6052,28 @@ void TreemapWidget::mouseReleaseEvent(QMouseEvent* event)
     }
 
     if (event->button() == Qt::LeftButton && m_current) {
-        const FileNode* pendingNode = m_pressHoldNode;
+        const QString pendingPath = m_pressHoldPath;
         const bool pressHoldTriggered = m_pressHoldTriggered;
         const QPointF pressPos = event->position();
         QRectF hitRect;
-        FileNode* hit = hitTest(m_current, pressPos, -1, currentRootViewRect(), &hitRect);
-        if (!hit || hit == m_current || hit->isVirtual) {
+        const bool initialMatches = isDescendantOfDirectMatch(m_current);
+        FileNode* hit = hitTest(m_current, pressPos, -1, currentRootViewRect(), initialMatches, &hitRect);
+        if (!hit || hit == m_current || hit->isVirtual()) {
             hit = nullptr;
             hitRect = QRectF();
         }
         cancelPressHold();
-        if (!pressHoldTriggered && pendingNode && hit == pendingNode) {
+        const bool samePath = hit
+            && !pendingPath.isEmpty()
+            && !hit->isVirtual()
+            && (hit->computePath() == pendingPath);
+        if (!pressHoldTriggered && samePath) {
             m_lastActivationPos = pressPos;
-            if (nodeSupportsImagePreview(hit)) {
+            if (hit->isDirectory()) {
+                emit nodeActivated(hit);
+            } else if (nodeSupportsImagePreview(hit)) {
                 requestImagePreview(hit, hitRect);
-            } else {
+            } else if (!m_settings.doubleClickToOpen) {
                 emit nodeActivated(hit);
             }
         }
@@ -5676,9 +6084,39 @@ void TreemapWidget::mouseReleaseEvent(QMouseEvent* event)
     QWidget::mouseReleaseEvent(event);
 }
 
+void TreemapWidget::paintLaunchAnimations(QPainter& painter)
+{
+    if (m_launchAnimations.isEmpty()) {
+        return;
+    }
+
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    for (const auto& anim : m_launchAnimations) {
+        if (anim.progress >= 1.0) continue;
+
+        // White flash that expands to 1.3x and fades out.
+        const qreal expansion = 1.0 + (anim.progress * 0.3);
+        const qreal opacity = 1.0 - anim.progress;
+
+        const QPointF center = anim.rect.center();
+        const qreal w = anim.rect.width() * expansion;
+        const qreal h = anim.rect.height() * expansion;
+        const QRectF drawRect(center.x() - w/2.0, center.y() - h/2.0, w, h);
+
+        painter.setOpacity(opacity);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(255, 255, 255, 160));
+        painter.drawRect(drawRect);
+    }
+
+    painter.restore();
+}
+
 void TreemapWidget::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         event->accept();
         return;
     }
@@ -5694,6 +6132,30 @@ void TreemapWidget::mouseDoubleClickEvent(QMouseEvent* event)
     }
 
     if (event->button() == Qt::LeftButton) {
+        if (m_settings.doubleClickToOpen && m_current) {
+            QRectF hitRect;
+            const bool initialMatches = isDescendantOfDirectMatch(m_current);
+            FileNode* hit = hitTest(m_current, event->position(), -1, currentRootViewRect(), initialMatches, &hitRect);
+            if (hit && hit != m_current && !hit->isVirtual()) {
+                m_lastActivationPos = event->position();
+                if (hit->isDirectory()) {
+                    emit nodeActivated(hit);
+                } else {
+                    // Trigger white flash launch animation for files.
+                    LaunchAnimation anim;
+                    anim.rect = hitRect;
+                    anim.progress = 0.0;
+                    m_launchAnimations.append(anim);
+
+                    if (m_launchProgressAnimation.state() != QAbstractAnimation::Running) {
+                        m_launchProgressAnimation.start();
+                    } else {
+                        m_launchProgressAnimation.setCurrentTime(0);
+                    }
+                    emit nodeOpenFile(hit);
+                }
+            }
+        }
         event->accept();
         return;
     }
@@ -5721,7 +6183,7 @@ void TreemapWidget::keyPressEvent(QKeyEvent* event)
 
 void TreemapWidget::wheelEvent(QWheelEvent* event)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         event->ignore();
         return;
     }
@@ -5911,8 +6373,8 @@ void TreemapWidget::resizeEvent(QResizeEvent* event)
     }
     if (outerSizeChanged) {
         m_currentRootLayoutAspectRatio = computeCurrentRootLayoutAspectRatio();
-        if (m_imagePreviewNode) {
-            const QRectF updatedSource = imagePreviewSourceRectForNode(m_imagePreviewNode);
+        if (FileNode* const previewNode = currentImagePreviewNode()) {
+            const QRectF updatedSource = imagePreviewSourceRectForNode(previewNode);
             if (updatedSource.isValid()) {
                 m_imagePreviewSourceRect = updatedSource;
             }
@@ -5925,7 +6387,7 @@ void TreemapWidget::resizeEvent(QResizeEvent* event)
 
 void TreemapWidget::leaveEvent(QEvent*)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         return;
     }
 
@@ -5948,7 +6410,7 @@ void TreemapWidget::leaveEvent(QEvent*)
 
 void TreemapWidget::contextMenuEvent(QContextMenuEvent* event)
 {
-    if (m_imagePreviewNode) {
+    if (hasOpenImagePreview()) {
         event->ignore();
         return;
     }
@@ -5960,9 +6422,10 @@ void TreemapWidget::contextMenuEvent(QContextMenuEvent* event)
     }
 
     const QPointF pos = event->pos();
+    const bool initialMatches = isDescendantOfDirectMatch(m_current);
     FileNode* hit = hitTest(m_current, pos, -1,
-                            currentRootViewRect());
-    if (hit && hit != m_current && !hit->isVirtual) {
+                            currentRootViewRect(), initialMatches);
+    if (hit && hit != m_current && !hit->isVirtual()) {
         hideOwnedTooltip();
         m_contextMenuActive = true;
         emit nodeContextMenuRequested(hit, event->globalPos());

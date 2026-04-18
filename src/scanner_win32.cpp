@@ -111,12 +111,27 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                          const ActivityCallback& activityCallback,
                          const Scanner::ErrorCallback& errorCallback,
                          float branchHue, unsigned long long rootDev,
-                         const std::atomic_bool* cancelFlag, int depth,
-                         bool parentInMarkedBranch)
+                         std::shared_ptr<const std::atomic_bool> cancelFlag, int depth,
+                         bool parentInMarkedBranch,
+                         ScanThrottler* throttler,
+                         bool alreadyThrottled)
 {
     if (depth > kMaxDepth || isCancelled(cancelFlag)) {
         return 0;
     }
+
+    // Determine current volume for throttling check.
+    unsigned long long currentDev = rootDev;
+    bool needsThrottle = false;
+    if (throttler && !alreadyThrottled) {
+        currentDev = static_cast<unsigned long long>(getVolumeSerial(toWin32Path(path)));
+        if (!throttler->isLocal(currentDev, path)) {
+            needsThrottle = true;
+        }
+    }
+
+    ThrottleGuard throttleGuard(throttler ? &throttler->networkSemaphore : nullptr, needsThrottle);
+    bool nextAlreadyThrottled = alreadyThrottled || needsThrottle;
 
     if (activityCallback) {
         activityCallback(path, scanState.root ? scanState.root->size : 0);
@@ -140,6 +155,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
         return 0;
     }
 
+    FileNode* lastChild = nullptr;
     do {
         if (isCancelled(cancelFlag)) {
             break;
@@ -164,7 +180,7 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
 
         FileNode* child = arena.alloc();
         child->name = childName;
-        child->isDirectory = isDir;
+        child->setIsDirectory(isDir);
         child->mtime = filetimeToUnixSeconds(fd.ftLastWriteTime);
         child->parent = node;
 
@@ -172,7 +188,16 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
             const QString childPath = childPathPrefix + childName;
             if (!shouldSkipPath(childPath, allExcludedPaths)) {
                 if (activityCallback) {
-                    activityCallback(childPath, scanState.root ? scanState.root->size : 0);
+                    static thread_local QElapsedTimer dirActivityTimer;
+                    static thread_local bool dirActivityTimerStarted = false;
+                    if (!dirActivityTimerStarted) {
+                        dirActivityTimer.start();
+                        dirActivityTimerStarted = true;
+                    }
+                    if (dirActivityTimer.elapsed() >= kActivityIntervalMs) {
+                        activityCallback(childPath, scanState.root ? scanState.root->size : 0);
+                        dirActivityTimer.restart();
+                    }
                 }
 
                 float childBranchHue = branchHue;
@@ -184,15 +209,15 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                 if (!settings.folderColorMarks.isEmpty()) {
                     auto it = settings.folderColorMarks.constFind(childPath);
                     if (it != settings.folderColorMarks.constEnd()) {
-                        child->colorMark = static_cast<uint8_t>(it.value());
-                        childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark));
+                        child->setColorMark(static_cast<uint8_t>(it.value()));
+                        childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark()));
                         childInMarkedBranch = true;
                     }
                 }
                 if (!settings.folderIconMarks.isEmpty()) {
                     auto it = settings.folderIconMarks.constFind(childPath);
                     if (it != settings.folderIconMarks.constEnd()) {
-                        child->iconMark = static_cast<uint8_t>(it.value());
+                        child->setIconMark(static_cast<uint8_t>(it.value()));
                     }
                 }
 
@@ -202,12 +227,18 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
                     child->color = ColorUtils::folderColor(depth + 1, childBranchHue, settings).rgba();
                 }
 
-                node->children.push_back(child);
+                if (!node->firstChild) {
+                    node->firstChild = child;
+                } else {
+                    lastChild->nextSibling = child;
+                }
+                lastChild = child;
+
                 child->size = scanNode(child, childPath, scanState, settings, allExcludedPaths,
                                        progressReadyCallback, progressCallback, arena,
                                        activityCallback, errorCallback,
                                        childBranchHue, rootDev, cancelFlag, depth + 1,
-                                       childInMarkedBranch);
+                                       childInMarkedBranch, throttler, nextAlreadyThrottled);
 
                 totalSize += child->size;
                 totalFileCount += child->subtreeFileCount;
@@ -225,9 +256,15 @@ qint64 Scanner::scanNode(FileNode* node, const QString& path, const ScanResult& 
             }
             child->size = fileSize;
             child->subtreeFileCount = 1;
-            child->extKey = ColorUtils::packFileExt(childName);
             child->color = ColorUtils::fileColorForName(childName, settings).rgba();
-            node->children.push_back(child);
+
+            if (!node->firstChild) {
+                node->firstChild = child;
+            } else {
+                lastChild->nextSibling = child;
+            }
+            lastChild = child;
+
             totalSize += fileSize;
             totalFileCount += 1;
             if (depth <= 1 && !isCancelled(cancelFlag)) {
@@ -248,26 +285,28 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                          ProgressReadyCallback progressReadyCallback,
                          ActivityCallback activityCallback,
                          ErrorCallback errorCallback,
-                         const std::atomic_bool* cancelFlag)
+                         std::shared_ptr<const std::atomic_bool> cancelFlag)
 {
     ScanResult result;
     result.arena = std::make_shared<NodeArena>();
-    result.profile = std::make_shared<ScanProfile>();
 
     const QString normalizedPath = QDir::cleanPath(path);
+    const QStorageInfo scanStorageInfo(normalizedPath);
+    const bool scanIsLocal = isLocalFilesystem(scanStorageInfo);
+
     QFileInfo rootInfo(normalizedPath);
     FileNode* root = result.arena->alloc();
-    root->name = rootInfo.fileName().isEmpty() ? normalizedPath : rootInfo.fileName();
-    root->absolutePath = normalizedPath;
-    root->isDirectory = true;
+    root->name = normalizedPath;
+    result.rootPath = normalizedPath;
+    root->setIsDirectory(true);
     root->parent = nullptr;
     const float initialHue = ColorUtils::initialFolderBranchHue(root, settings);
     bool rootInMarkedBranch = false;
     if (!settings.folderColorMarks.isEmpty()) {
         auto it = settings.folderColorMarks.constFind(normalizedPath);
         if (it != settings.folderColorMarks.constEnd()) {
-            root->colorMark = static_cast<uint8_t>(it.value());
-            root->color = ColorUtils::folderColorForMark(0, ColorUtils::markHue(static_cast<FolderMark>(root->colorMark)), settings).rgba();
+            root->setColorMark(static_cast<uint8_t>(it.value()));
+            root->color = ColorUtils::folderColorForMark(0, ColorUtils::markHue(static_cast<FolderMark>(root->colorMark())), settings).rgba();
             rootInMarkedBranch = true;
         }
     }
@@ -277,28 +316,35 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
     if (!settings.folderIconMarks.isEmpty()) {
         auto it = settings.folderIconMarks.constFind(normalizedPath);
         if (it != settings.folderIconMarks.constEnd()) {
-            root->iconMark = static_cast<uint8_t>(it.value());
+            root->setIconMark(static_cast<uint8_t>(it.value()));
         }
     }
 
     result.root = root;
-
     const bool trackWorkerPaths = settings.enableScanActivityTracking && static_cast<bool>(progressCallback);
     const bool trackByteActivity = settings.enableScanActivityTracking && static_cast<bool>(activityCallback);
     auto liveBytesSeen = trackByteActivity
         ? std::make_shared<std::atomic<qint64>>(0)
         : std::shared_ptr<std::atomic<qint64>>();
+    const int effectiveParallelPartitionDepth = scanIsLocal
+        ? settings.parallelPartitionDepth
+        : std::min(settings.parallelPartitionDepth, 2);
+
+    const unsigned int concurrencyHint = std::max(1u, std::thread::hardware_concurrency());
+    const size_t effectiveWorkerCount = scanIsLocal ? concurrencyHint : std::min(concurrencyHint, 2u);
+    const size_t targetTaskCount = effectiveWorkerCount * 4;
 
     if (!rootInfo.isReadable()) {
-        QStorageInfo storageInfo(normalizedPath);
-        result.freeBytes = storageInfo.bytesFree();
-        result.totalBytes = storageInfo.bytesTotal();
+        result.freeBytes = scanStorageInfo.bytesFree();
+        result.totalBytes = scanStorageInfo.bytesTotal();
+        rebuildScanResultSnapshot(result);
         return result;
     }
 
     emitProgress(result, normalizedPath, progressReadyCallback, progressCallback, true);
     if (isCancelled(cancelFlag)) {
         result.root = nullptr;
+        rebuildScanResultSnapshot(result);
         return result;
     }
 
@@ -339,9 +385,11 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
     const unsigned long long initialRootDev = static_cast<unsigned long long>(
         getVolumeSerial(toWin32Path(normalizedPath)));
 
+    auto throttler = std::make_shared<ScanThrottler>();
+
     std::vector<DirTask> dirTasks;
     std::vector<PartitionTask> partitionQueue;
-    partitionQueue.push_back({root, normalizedPath, rootInMarkedBranch ? ColorUtils::markHue(static_cast<FolderMark>(root->colorMark)) : initialHue, initialRootDev, 0, rootInMarkedBranch});
+    partitionQueue.push_back({root, normalizedPath, rootInMarkedBranch ? ColorUtils::markHue(static_cast<FolderMark>(root->colorMark())) : initialHue, initialRootDev, 0, rootInMarkedBranch});
 
     for (size_t partitionIndex = 0; partitionIndex < partitionQueue.size(); ++partitionIndex) {
         if (isCancelled(cancelFlag)) {
@@ -349,12 +397,12 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         }
 
         const PartitionTask partition = partitionQueue[partitionIndex];
-        if (partition.depth > 0) {
-            addSizeUpwards(partition.parent, -kProvisionalDirectoryPreviewSize);
-        }
         const QString childPathPrefix = childPathPrefixForParent(partition.path);
         const std::wstring win32Dir = toWin32Path(partition.path);
         const std::wstring searchPat = toSearchPattern(win32Dir);
+
+        bool partitionThrottled = !throttler->isLocal(partition.rootDev, partition.path);
+        ThrottleGuard partitionThrottleGuard(&throttler->networkSemaphore, partitionThrottled);
 
         WIN32_FIND_DATAW fd;
         HANDLE hFind = FindFirstFileExW(searchPat.c_str(), FindExInfoBasic, &fd,
@@ -365,6 +413,12 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 reportScanWarning(errorCallback, partition.path, err);
             }
             continue;
+        }
+
+        FileNode* lastPartitionChild = nullptr;
+        if (partition.parent->firstChild) {
+            lastPartitionChild = partition.parent->firstChild;
+            while (lastPartitionChild->nextSibling) lastPartitionChild = lastPartitionChild->nextSibling;
         }
 
         do {
@@ -389,7 +443,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
             FileNode* child = result.arena->alloc();
             child->name = childName;
-            child->isDirectory = isDir;
+            child->setIsDirectory(isDir);
             child->mtime = filetimeToUnixSeconds(fd.ftLastWriteTime);
             child->parent = partition.parent;
 
@@ -405,15 +459,15 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                     if (!settings.folderColorMarks.isEmpty()) {
                         auto it = settings.folderColorMarks.constFind(childPath);
                         if (it != settings.folderColorMarks.constEnd()) {
-                            child->colorMark = static_cast<uint8_t>(it.value());
-                            childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark));
+                            child->setColorMark(static_cast<uint8_t>(it.value()));
+                            childBranchHue = ColorUtils::markHue(static_cast<FolderMark>(child->colorMark()));
                             childInMarkedBranch = true;
                         }
                     }
                     if (!settings.folderIconMarks.isEmpty()) {
                         auto it = settings.folderIconMarks.constFind(childPath);
                         if (it != settings.folderIconMarks.constEnd()) {
-                            child->iconMark = static_cast<uint8_t>(it.value());
+                            child->setIconMark(static_cast<uint8_t>(it.value()));
                         }
                     }
 
@@ -423,11 +477,15 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                         child->color = ColorUtils::folderColor(partition.depth + 1, childBranchHue, settings).rgba();
                     }
 
-                    child->size = kProvisionalDirectoryPreviewSize;
-                    partition.parent->children.push_back(child);
-                    addSizeUpwards(partition.parent, child->size);
+                    if (!partition.parent->firstChild) {
+                        partition.parent->firstChild = child;
+                    } else {
+                        lastPartitionChild->nextSibling = child;
+                    }
+                    lastPartitionChild = child;
 
-                    if (partition.depth + 1 < settings.parallelPartitionDepth) {
+                    const size_t pendingTasks = dirTasks.size() + (partitionQueue.size() - partitionIndex - 1);
+                    if (partition.depth + 1 < effectiveParallelPartitionDepth || (pendingTasks < targetTaskCount && partition.depth + 1 < kMaxDepth)) {
                         partitionQueue.push_back({child, childPath, childBranchHue, partition.rootDev, partition.depth + 1, childInMarkedBranch});
                     } else {
                         dirTasks.push_back({child, childPath, childBranchHue, partition.rootDev, partition.depth + 1, childInMarkedBranch});
@@ -437,9 +495,15 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 const qint64 fileSize = getFileSizeFromFindData(fd);
                 child->size = fileSize;
                 child->subtreeFileCount = 1;
-                child->extKey = ColorUtils::packFileExt(childName);
                 child->color = ColorUtils::fileColorForName(childName, settings).rgba();
-                partition.parent->children.push_back(child);
+                
+                if (!partition.parent->firstChild) {
+                    partition.parent->firstChild = child;
+                } else {
+                    lastPartitionChild->nextSibling = child;
+                }
+                lastPartitionChild = child;
+
                 addStatsUpwards(partition.parent, fileSize, 1);
                 if (trackByteActivity) {
                     liveBytesSeen->fetch_add(fileSize, std::memory_order_relaxed);
@@ -454,6 +518,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
     if (isCancelled(cancelFlag)) {
         result.root = nullptr;
+        rebuildScanResultSnapshot(result);
         return result;
     }
 
@@ -469,7 +534,6 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         std::vector<WorkerResult> results;
     };
 
-    const unsigned int concurrencyHint = std::max(1u, std::thread::hardware_concurrency());
     const size_t workerCount = std::min(dirTasks.size(), static_cast<size_t>(concurrencyHint));
     std::atomic_size_t nextTaskIndex {0};
     LiveWorkerPaths liveWorkerPaths;
@@ -481,7 +545,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
     for (size_t workerIndex = 0; workerIndex < workerCount; ++workerIndex) {
         futures.push_back(std::async(std::launch::async,
-                                     [&, workerIndex, cancelFlag]() -> WorkerBatchResult {
+                                     [&, throttler, workerIndex, cancelFlag, arena = result.arena]() -> WorkerBatchResult {
             WorkerBatchResult batch;
             while (true) {
                 const size_t taskIndex = nextTaskIndex.fetch_add(1, std::memory_order_relaxed);
@@ -498,8 +562,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 r.arena = std::make_shared<NodeArena>();
                 r.workerRoot = r.arena->alloc();
                 r.workerRoot->name = task.placeholder->name;
-                r.workerRoot->absolutePath = task.childPath;
-                r.workerRoot->isDirectory = true;
+                r.workerRoot->setIsDirectory(true);
                 r.workerRoot->parent = nullptr;
                 r.workerRoot->color = task.placeholder->color;
                 if (isCancelled(cancelFlag)) {
@@ -545,12 +608,16 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                     };
                 }
                 ScanResult dummy;
+                dummy.rootPath = task.childPath;
+
+                bool taskThrottled = !throttler->isLocal(task.rootDev, task.childPath);
+
                 Scanner::scanNode(r.workerRoot, task.childPath, dummy, settings, allExcludedPaths, {},
                                   nullptr,
                                   *r.arena, workerActivityCallback,
                                   errorCallback,
                                   task.branchHue, task.rootDev, cancelFlag, task.depth,
-                                  task.inMarkedBranch);
+                                  task.inMarkedBranch, throttler.get(), taskThrottled);
 
                 if (isCancelled(cancelFlag)) {
                     r.workerRoot = nullptr;
@@ -584,22 +651,17 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
                 if (!r.workerRoot) {
                     continue;
                 }
-                const qint64 provisionalSize = r.placeholder->size;
-                const int provisionalFileCount = r.placeholder->subtreeFileCount;
                 r.placeholder->size = r.workerRoot->size;
                 r.placeholder->subtreeFileCount = r.workerRoot->subtreeFileCount;
-                r.placeholder->children = std::move(r.workerRoot->children);
-                for (FileNode* child : r.placeholder->children) {
+                
+                r.placeholder->firstChild = r.workerRoot->firstChild;
+                for (FileNode* child = r.placeholder->firstChild; child; child = child->nextSibling) {
                     child->parent = r.placeholder;
                 }
-                addStatsUpwards(r.placeholder->parent, r.placeholder->size - provisionalSize,
-                                r.placeholder->subtreeFileCount - provisionalFileCount);
-                QElapsedTimer mergeTimer;
-                mergeTimer.start();
+
+                addStatsUpwards(r.placeholder->parent, r.placeholder->size,
+                                r.placeholder->subtreeFileCount);
                 result.arena->merge(std::move(*r.arena));
-                if (result.profile) {
-                    result.profile->mergeNs += mergeTimer.nsecsElapsed();
-                }
             }
             collected[i] = true;
             --remaining;
@@ -628,6 +690,7 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
     if (isCancelled(cancelFlag)) {
         result.root = nullptr;
+        rebuildScanResultSnapshot(result);
         return result;
     }
 
@@ -664,7 +727,6 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
         }
         if (excluded)
             continue;
-        // Skip volumes sharing the same underlying device (e.g. ReFS subvolumes)
         if (seenDevices.contains(vol.device()))
             continue;
         seenDevices.insert(vol.device());
@@ -677,5 +739,6 @@ ScanResult Scanner::scan(const QString& path, const TreemapSettings& settings,
 
     emitProgress(result, path, progressReadyCallback, progressCallback, true);
 
+    rebuildScanResultSnapshot(result);
     return result;
 }

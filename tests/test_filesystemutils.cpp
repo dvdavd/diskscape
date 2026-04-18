@@ -11,9 +11,20 @@ private slots:
     void knownNetworkFsTypes_areNonLocal()
     {
         QVERIFY(!isLocalFilesystem(QStringLiteral("nfs"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
+        QVERIFY(!isLocalFilesystem(QStringLiteral("nfs4"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
+        QVERIFY(!isLocalFilesystem(QStringLiteral("NFS4.2"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
         QVERIFY(!isLocalFilesystem(QStringLiteral("smbfs"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
+        QVERIFY(!isLocalFilesystem(QStringLiteral("SMB3"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
         QVERIFY(!isLocalFilesystem(QStringLiteral("cifs"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
         QVERIFY(!isLocalFilesystem(QStringLiteral("sshfs"), QByteArrayLiteral("/dev/disk1s1"), QStringLiteral("/")));
+    }
+
+    void deviceWithColon_isNonLocal()
+    {
+#ifndef Q_OS_WIN
+        // NFS-style host:/path devices should be caught as non-local even if the type is unknown
+        QVERIFY(!isLocalFilesystem(QString(), QByteArrayLiteral("server:/export"), QStringLiteral("/mnt/nfs")));
+#endif
     }
 
     void unixStyleNetworkDevicePrefixes_areNonLocal()

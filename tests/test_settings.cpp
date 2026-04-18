@@ -157,6 +157,18 @@ private slots:
         QVERIFY(s.wheelZoomMaxScale >= s.wheelZoomMinScale);
     }
 
+    void settings_sanitize_clampsScanPreviewMode()
+    {
+        TreemapSettings s;
+        s.scanPreviewMode = -99;
+        s.sanitize();
+        QCOMPARE(s.scanPreviewMode, TreemapSettings::ScanPreviewNone);
+
+        s.scanPreviewMode = 999;
+        s.sanitize();
+        QCOMPARE(s.scanPreviewMode, TreemapSettings::ScanPreviewFast);
+    }
+
     void settings_sanitize_removesDuplicateExcludedPaths()
     {
         TreemapSettings s;
@@ -278,7 +290,7 @@ private slots:
         original.depthRevealPerZoomDoubling = 3.5;
         original.minRevealWidth     = 84.0;
         original.revealFadeWidth    = 18.0;
-        original.liveScanPreview    = false;
+        original.scanPreviewMode    = TreemapSettings::ScanPreviewNone;
         original.excludedPaths      = {"/tmp/no-scan"};
         original.activeColorThemeId = TreemapColorTheme::builtInDarkId();
         original.sanitize();
@@ -299,7 +311,7 @@ private slots:
         QCOMPARE(loaded.depthRevealPerZoomDoubling, original.depthRevealPerZoomDoubling);
         QCOMPARE(loaded.minRevealWidth,     original.minRevealWidth);
         QCOMPARE(loaded.revealFadeWidth,    original.revealFadeWidth);
-        QCOMPARE(loaded.liveScanPreview,    original.liveScanPreview);
+        QCOMPARE(loaded.scanPreviewMode,    original.scanPreviewMode);
         QCOMPARE(loaded.excludedPaths,      original.excludedPaths);
         QCOMPARE(loaded.activeColorThemeId, original.activeColorThemeId);
     }
@@ -328,6 +340,27 @@ private slots:
         QCOMPARE(loaded.minRevealHeight, 36.0);
         QCOMPARE(loaded.revealFadeWidth, 20.0);
         QCOMPARE(loaded.revealFadeHeight, 18.0);
+    }
+
+    void settings_load_scanPreviewMode_prefersModernKeyOverLegacy()
+    {
+        QTemporaryFile tmpFile;
+        QVERIFY(tmpFile.open());
+        tmpFile.close();
+
+        {
+            QSettings store(tmpFile.fileName(), QSettings::IniFormat);
+            store.setValue("treemap/liveScanPreview", false);
+            store.setValue("treemap/scanPreviewMode", 2);
+        }
+
+        TreemapSettings loaded;
+        {
+            QSettings store(tmpFile.fileName(), QSettings::IniFormat);
+            loaded = TreemapSettings::load(store);
+        }
+
+        QCOMPARE(loaded.scanPreviewMode, TreemapSettings::ScanPreviewFast);
     }
 
     void settings_loadSave_fileTypeOptions_roundtrip()

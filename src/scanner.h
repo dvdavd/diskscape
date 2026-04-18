@@ -3,21 +3,16 @@
 #pragma once
 
 #include "filenode.h"
+#include "treemapsnapshot.h"
 #include "treemapsettings.h"
+#include <algorithm>
 #include <QString>
 #include <QVector>
 #include <atomic>
 #include <functional>
 #include <memory>
-
-struct ScanProfile {
-    qint64 progressCalls = 0;
-    qint64 progressSnapshots = 0;
-    qint64 progressThrottleSkips = 0;
-    qint64 progressCloneNs = 0;
-    qint64 progressCallbackNs = 0;
-    qint64 mergeNs = 0;
-};
+#include <mutex>
+#include <vector>
 
 struct ScanWarning {
     QString path;
@@ -32,15 +27,31 @@ struct FsInfo {
     bool isLocal = true;          // false for NFS, CIFS, and other network filesystems
 };
 
+struct HardLinkTracker;
+struct ScanThrottler;
+
 struct ScanResult {
     std::shared_ptr<NodeArena> arena;
+    std::shared_ptr<TreemapSnapshot> snapshot;
     FileNode* root = nullptr;   // owned by arena
+    QString rootPath;
     qint64 freeBytes = 0;
     qint64 totalBytes = 0;
+    qint64 fileCount = 0;
     QString currentScanPath;
-    std::shared_ptr<ScanProfile> profile;
     QVector<FsInfo> filesystems;  // per-filesystem data (empty on progress snapshots)
+    std::shared_ptr<HardLinkTracker> hardLinkTracker;
 };
+
+inline void rebuildScanResultSnapshot(ScanResult& result)
+{
+    if (!result.root || !result.arena) {
+        result.snapshot.reset();
+        return;
+    }
+
+    result.snapshot = makeTreemapSnapshot(result.root, result.rootPath, result.arena, nextSnapshotGeneration());
+}
 
 class Scanner {
 public:
@@ -54,7 +65,7 @@ public:
                            ProgressReadyCallback progressReadyCallback = {},
                            ActivityCallback activityCallback = {},
                            ErrorCallback errorCallback = {},
-                           const std::atomic_bool* cancelFlag = nullptr);
+                           std::shared_ptr<const std::atomic_bool> cancelFlag = nullptr);
 
 private:
     static qint64 scanNode(FileNode* node, const QString& path, const ScanResult& scanState,
@@ -64,6 +75,8 @@ private:
                            const ProgressCallback& progressCallback, NodeArena& arena,
                            const ActivityCallback& activityCallback,
                            const ErrorCallback& errorCallback,
-                           float branchHue, unsigned long long rootDev, const std::atomic_bool* cancelFlag = nullptr, int depth = 0,
-                           bool inMarkedBranch = false);
+                           float branchHue, unsigned long long rootDev, std::shared_ptr<const std::atomic_bool> cancelFlag = nullptr, int depth = 0,
+                           bool inMarkedBranch = false,
+                           ScanThrottler* throttler = nullptr,
+                           bool alreadyThrottled = false);
 };

@@ -142,6 +142,7 @@ private:
     QDoubleSpinBox* m_wheelZoomStepPercent = nullptr;
     QCheckBox* m_fastWheelZoom = nullptr;
     QCheckBox* m_trackpadScrollPans = nullptr;
+    QCheckBox* m_doubleClickToOpen = nullptr;
     QCheckBox* m_simpleTooltips = nullptr;
     QCheckBox* m_showThumbnails = nullptr;
     QCheckBox* m_showVideoThumbnails = nullptr;

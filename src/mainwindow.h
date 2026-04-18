@@ -6,6 +6,7 @@
 #include "treemapwidget.h"
 #include "treemapsettings.h"
 
+#include <QElapsedTimer>
 #include <QFutureWatcher>
 #include <QMainWindow>
 #include <QMutex>
@@ -43,6 +44,7 @@ public:
     void openInitialPath(const QString& path);
 
 protected:
+    bool event(QEvent* event) override;
     void changeEvent(QEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -65,6 +67,7 @@ private slots:
     void processQueuedScanActivity();
     void processQueuedPermissionErrors();
     void onNodeActivated(FileNode* node);
+    void onNodeOpenFile(FileNode* node);
     void onNodeHovered(FileNode* node);
     void onZoomInRequested(FileNode* node, QPointF anchorPos);
     void onZoomOutRequested(QPointF anchorPos);
@@ -78,15 +81,16 @@ private slots:
 
 private:
     QString nodePath(FileNode* node) const;
+    bool isTreeInteractionBlocked() const;
+    bool startPendingScanRequestIfNeeded();
     void syncFilesystemWatchControllerState();
     void finalizeIncrementalRefresh(IncrementalRefreshResult refreshed);
     void onScanProgress(ScanResult scanResult);
-    void updateScanStatusMessage();
+    void updateScanStatusMessage(bool force = false);
     void clearCompletedStatusLabels();
     void updateCompletedStatusLabels();
     void refreshTypeLegendAsync(FileNode* root);
     void scheduleTreeMaintenance();
-    void restoreHistoryFromPaths(const std::vector<ViewStatePaths>& historyPaths, FileNode* root);
     void activatePath(const QString& path, bool forceScan);
     void startScan(const QString& dir, bool forceRescan = false, bool backgroundRefresh = false);
     void navigateTo(FileNode* node, bool pushHistory,
@@ -213,10 +217,18 @@ private:
     bool m_scanActivityQueued = false;
     QString m_latestScanActivityPath;
     qint64 m_latestScannedBytes = 0;
+    qint64 m_scanProgressPostedCount = 0;
+    qint64 m_scanProgressProcessedCount = 0;
+    qint64 m_scanActivityPostedCount = 0;
+    qint64 m_scanActivityProcessedCount = 0;
+    qint64 m_scanPermissionPostedCount = 0;
+    qint64 m_scanPermissionProcessedCount = 0;
+    QElapsedTimer m_scanStatusUpdateTimer;
     QString m_currentPath;
     QStringList m_recentPaths;
     QStringList m_favouritePaths;
     std::vector<TreemapWidget::ViewState> m_history;
+    QElapsedTimer m_scanStartTime;
     bool m_scanInProgress = false;
     bool m_backgroundRefreshInProgress = false;
     bool m_incrementalRefreshInProgress = false;
@@ -233,8 +245,6 @@ private:
     QTimer* m_themeSettleTimer = nullptr;
     FreedesktopColorSchemeWatcher* m_colorSchemeWatcher = nullptr;
     QString m_activeRefreshPath;
-    ViewStatePaths m_preRefreshViewPaths;
-    std::vector<ViewStatePaths> m_preRefreshHistoryPaths;
     TreemapSettings m_settings;
     std::shared_ptr<std::atomic_bool> m_scanCancelToken;
     std::shared_ptr<std::atomic_bool> m_refreshCancelToken;

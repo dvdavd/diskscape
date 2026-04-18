@@ -437,12 +437,20 @@ FileNode* SettingsDialog::createPreviewNode(NodeArena& arena, const QString& nam
     FileNode* node = arena.alloc();
     node->name = name;
     node->size = size;
-    node->isDirectory = isDirectory;
-    node->extKey = isDirectory ? 0 : ColorUtils::packFileExt(name);
+    node->displaySize = size;
+    node->setIsDirectory(isDirectory);
     node->color = color;
     node->parent = parent;
     if (parent) {
-        parent->children.push_back(node);
+        if (!parent->firstChild) {
+            parent->firstChild = node;
+        } else {
+            FileNode* last = parent->firstChild;
+            while (last->nextSibling) {
+                last = last->nextSibling;
+            }
+            last->nextSibling = node;
+        }
     }
     return node;
 }
@@ -531,6 +539,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_wheelZoomStepPercent->setSuffix(tr("%"));
     m_fastWheelZoom = new QCheckBox(tr("Use fast wheel zoom animation (stretch/blend)"), this);
     m_trackpadScrollPans = new QCheckBox(tr("Scroll pans, Ctrl+scroll zooms (trackpad mode)"), this);
+    m_doubleClickToOpen = new QCheckBox(tr("Double-click a file tile to open it"), this);
     m_simpleTooltips = new QCheckBox(tr("Use smaller, simpler tooltips in the treemap"));
     m_showThumbnails = new QCheckBox(tr("Show previews for image files"));
     m_showVideoThumbnails = new QCheckBox(tr("Show previews for video files"));
@@ -554,7 +563,8 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     m_cameraMaxScaleValue = new QLabel(this);
     m_cameraMaxScaleValue->setMinimumWidth(32);
     m_cameraMaxScaleValue->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    m_liveScanPreview = new QCheckBox(tr("Enable live updates while scanning (slightly slower)"));
+    m_liveScanPreview = new QCheckBox(
+        tr("Show scan preview (slightly slower)"), this);
     m_excludedPathEdit = new QLineEdit(this);
     m_excludedPathEdit->setPlaceholderText(tr("/var/lib/docker"));
     m_excludedPathsList = new QListWidget(this);
@@ -672,14 +682,33 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     motionForm->addRow(tr("Camera duration (ms)"),
                        createFieldWithDescription(m_cameraDurationMs,
                            tr("Length of wheel-zoom camera motion. Set to zero for instant movement.")));
-    motionForm->addRow(tr("Wheel zoom step"),
-                       createFieldWithDescription(m_wheelZoomStepPercent,
-                           tr("Scale change applied for each wheel step. Higher values zoom faster.")));
-    motionForm->addRow(m_trackpadScrollPans);
+    motionForm->addRow(createFieldWithDescription(m_fastWheelZoom, QString()));
     appearanceControlsLayout->addWidget(createSectionGroup(
-        tr("Animation timing"),
+        tr("Animation"),
         tr("Set zoom and camera animation speed."),
         motionForm));
+
+    auto* navigationForm = new QFormLayout();
+    navigationForm->addRow(tr("Wheel zoom step"),
+                       createFieldWithDescription(m_wheelZoomStepPercent,
+                           tr("Scale change applied for each wheel step. Higher values zoom faster.")));
+
+    auto* cameraMaxScaleRow = new QWidget(this);
+    auto* cameraMaxScaleLayout = new QHBoxLayout(cameraMaxScaleRow);
+    cameraMaxScaleLayout->setContentsMargins(0, 0, 0, 0);
+    cameraMaxScaleLayout->setSpacing(12);
+    cameraMaxScaleLayout->addWidget(m_cameraMaxScale, 1);
+    cameraMaxScaleLayout->addWidget(m_cameraMaxScaleValue);
+    navigationForm->addRow(tr("Camera max scale"),
+                           createFieldWithDescription(cameraMaxScaleRow,
+                               tr("Maximum allowed camera zoom level.")));
+
+    navigationForm->addRow(m_trackpadScrollPans);
+    navigationForm->addRow(m_doubleClickToOpen);
+    appearanceControlsLayout->addWidget(createSectionGroup(
+        tr("Navigation && interaction"),
+        tr("Control how you move through and interact with the treemap."),
+        navigationForm));
 
     auto* tooltipForm = new QFormLayout();
     tooltipForm->addRow(m_simpleTooltips);
@@ -811,12 +840,12 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     performanceLayout->setSpacing(16);
     performanceLayout->addWidget(createPageIntro(
         tr("Adjust performance"),
-        tr("Control scan updates, visibility thresholds, and zoom limits.")));
+        tr("Control scan updates and visibility thresholds.")));
 
     auto* renderingForm = new QFormLayout();
     renderingForm->addRow(createFieldWithDescription(m_liveScanPreview, QString()));
     performanceLayout->addWidget(createSectionGroup(
-        tr("Scan updates"),
+        tr("Scan preview"),
         QString(),
         renderingForm));
 
@@ -854,22 +883,7 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
         tr("Child visibility"),
         tr("Set when folder details and child tiles appear."),
         densityForm));
-
-    auto* navigationForm = new QFormLayout();
-    auto* cameraMaxScaleRow = new QWidget(this);
-    auto* cameraMaxScaleLayout = new QHBoxLayout(cameraMaxScaleRow);
-    cameraMaxScaleLayout->setContentsMargins(0, 0, 0, 0);
-    cameraMaxScaleLayout->setSpacing(12);
-    cameraMaxScaleLayout->addWidget(m_cameraMaxScale, 1);
-    cameraMaxScaleLayout->addWidget(m_cameraMaxScaleValue);
-    navigationForm->addRow(tr("Camera max scale"),
-                           createFieldWithDescription(cameraMaxScaleRow,
-                               tr("Maximum allowed camera zoom level.")));
-    navigationForm->addRow(createFieldWithDescription(m_fastWheelZoom, QString()));
-    performanceLayout->addWidget(createSectionGroup(
-        tr("Navigation"),
-        tr("Set the maximum camera zoom level."),
-        navigationForm));
+    performanceLayout->addStretch();
 
     auto* exclusionsPage = new QWidget(this);
     auto* exclusionsLayout = new QVBoxLayout(exclusionsPage);
@@ -1280,9 +1294,10 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     });
 
     applySettingsToFields(currentSettings);
-    m_previewWidget->setRoot(m_previewRoot, {}, true, false);
-    if (!m_previewRoot->children.empty()) {
-        m_previewWidget->setPreviewHoveredNode(m_previewRoot->children.front());
+    auto previewSnapshot = makeTreemapSnapshot(m_previewRoot, QDir::rootPath(), nullptr);
+    m_previewWidget->setRoot(std::move(previewSnapshot), true, false);
+    if (m_previewRoot->firstChild) {
+        m_previewWidget->setPreviewHoveredNode(m_previewRoot->firstChild);
     }
     refreshPreview();
 
@@ -1578,6 +1593,7 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_wheelZoomStepPercent->setValue(settings.wheelZoomStepPercent);
     m_fastWheelZoom->setChecked(settings.fastWheelZoom);
     m_trackpadScrollPans->setChecked(settings.trackpadScrollPans);
+    m_doubleClickToOpen->setChecked(settings.doubleClickToOpen);
     m_simpleTooltips->setChecked(settings.simpleTooltips);
     m_showThumbnails->setChecked(settings.showThumbnails);
     m_showVideoThumbnails->setChecked(settings.showVideoThumbnails);
@@ -1589,7 +1605,7 @@ void SettingsDialog::applySettingsToFields(const TreemapSettings& settings)
     m_thumbnailSkipNetworkPaths->setChecked(settings.thumbnailSkipNetworkPaths);
     m_cameraMaxScale->setValue(static_cast<int>(std::round(settings.cameraMaxScale)));
     m_cameraMaxScaleValue->setText(QString::number(static_cast<int>(std::round(settings.cameraMaxScale))));
-    m_liveScanPreview->setChecked(settings.liveScanPreview);
+    m_liveScanPreview->setChecked(settings.scanPreviewMode == TreemapSettings::ScanPreviewFast);
     m_followSystemColorTheme->setChecked(settings.followSystemColorTheme);
     m_hideNonLocalFreeSpace->setChecked(settings.hideNonLocalFreeSpace);
     m_randomColorForUnknownFiles->setChecked(settings.randomColorForUnknownFiles);
@@ -1676,6 +1692,7 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.wheelZoomStepPercent = m_wheelZoomStepPercent->value();
     currentSettings.fastWheelZoom = m_fastWheelZoom->isChecked();
     currentSettings.trackpadScrollPans = m_trackpadScrollPans->isChecked();
+    currentSettings.doubleClickToOpen = m_doubleClickToOpen->isChecked();
     currentSettings.simpleTooltips = m_simpleTooltips->isChecked();
     currentSettings.showThumbnails = m_showThumbnails->isChecked();
     currentSettings.showVideoThumbnails = m_showVideoThumbnails->isChecked();
@@ -1686,7 +1703,9 @@ TreemapSettings SettingsDialog::settings() const
     currentSettings.thumbnailMaxFileSizeMB = m_thumbnailMaxFileSizeMB->value();
     currentSettings.thumbnailSkipNetworkPaths = m_thumbnailSkipNetworkPaths->isChecked();
     currentSettings.cameraMaxScale = m_cameraMaxScale->value();
-    currentSettings.liveScanPreview = m_liveScanPreview->isChecked();
+    currentSettings.scanPreviewMode = m_liveScanPreview->isChecked()
+        ? TreemapSettings::ScanPreviewFast
+        : TreemapSettings::ScanPreviewNone;
     currentSettings.randomColorForUnknownFiles = m_randomColorForUnknownFiles->isChecked();
     currentSettings.activeColorThemeId = !m_selectedColorThemeId.isEmpty()
         ? m_selectedColorThemeId
@@ -1744,211 +1763,195 @@ void SettingsDialog::updateColorThemeEditorState()
 void SettingsDialog::buildPreviewTree()
 {
     m_previewRoot = createPreviewNode(m_previewArena, QStringLiteral("Root"), 1120, true);
-    m_previewRoot->absolutePath = QDir::rootPath();
 
     FileNode* workspace = createPreviewNode(m_previewArena, "workspace", 460, true, 0, m_previewRoot);
     FileNode* assets = createPreviewNode(m_previewArena, "assets", 360, true, 0, m_previewRoot);
     FileNode* system = createPreviewNode(m_previewArena, "system", 300, true, 0, m_previewRoot);
-    workspace->iconMark = static_cast<uint8_t>(FolderMark::CatDevelopment);
+    workspace->setIconMark(static_cast<uint8_t>(FolderMark::CatDevelopment));
 
     createPreviewNode(m_previewArena, "README.md", 28, false, qRgb(96, 156, 214), workspace);
     createPreviewNode(m_previewArena, "bundle.weird", 26, false, qRgb(128, 128, 128), workspace);
-    createPreviewNode(m_previewArena, "apps", 150, true, 0, workspace);
-    createPreviewNode(m_previewArena, "docs", 120, true, 0, workspace);
-    createPreviewNode(m_previewArena, "shared", 95, true, 0, workspace);
+    FileNode* apps = createPreviewNode(m_previewArena, "apps", 150, true, 0, workspace);
+    FileNode* docs = createPreviewNode(m_previewArena, "docs", 120, true, 0, workspace);
+    FileNode* shared = createPreviewNode(m_previewArena, "shared", 95, true, 0, workspace);
     createPreviewNode(m_previewArena, "build.ninja", 32, false, qRgb(122, 176, 224), workspace);
 
-    createPreviewNode(m_previewArena, "media", 145, true, 0, assets);
-    createPreviewNode(m_previewArena, "icons", 90, true, 0, assets);
-    createPreviewNode(m_previewArena, "textures", 70, true, 0, assets);
+    FileNode* media = createPreviewNode(m_previewArena, "media", 145, true, 0, assets);
+    FileNode* icons = createPreviewNode(m_previewArena, "icons", 90, true, 0, assets);
+    FileNode* textures = createPreviewNode(m_previewArena, "textures", 70, true, 0, assets);
     createPreviewNode(m_previewArena, "sample.jpg", 200, false, qRgb(190, 96, 96), assets);
     createPreviewNode(m_previewArena, "sprite.odd", 24, false, qRgb(128, 128, 128), assets);
 
-    createPreviewNode(m_previewArena, "logs", 110, true, 0, system);
-    createPreviewNode(m_previewArena, "services", 90, true, 0, system);
-    createPreviewNode(m_previewArena, "cache", 65, true, 0, system);
+    FileNode* logs = createPreviewNode(m_previewArena, "logs", 110, true, 0, system);
+    FileNode* services = createPreviewNode(m_previewArena, "services", 90, true, 0, system);
+    FileNode* cacheRoot = createPreviewNode(m_previewArena, "cache", 65, true, 0, system);
     createPreviewNode(m_previewArena, "temp.db", 35, false, qRgb(186, 170, 222), system);
     createPreviewNode(m_previewArena, "snapshot.blobx", 22, false, qRgb(128, 128, 128), system);
 
-    FileNode* apps = workspace->children[2];
     createPreviewNode(m_previewArena, "widgets", 62, true, 0, apps);
     createPreviewNode(m_previewArena, "core", 54, true, 0, apps);
     createPreviewNode(m_previewArena, "tests", 34, true, 0, apps);
 
-    FileNode* docs = workspace->children[3];
     createPreviewNode(m_previewArena, "preview", 52, true, 0, docs);
     createPreviewNode(m_previewArena, "guide.md", 38, false, qRgb(108, 166, 126), docs);
     createPreviewNode(m_previewArena, "api.txt", 30, false, qRgb(85, 153, 118), docs);
 
-    FileNode* shared = workspace->children[4];
     createPreviewNode(m_previewArena, "theme", 38, true, 0, shared);
     createPreviewNode(m_previewArena, "platform", 33, true, 0, shared);
     createPreviewNode(m_previewArena, "types.h", 24, false, qRgb(118, 189, 154), shared);
 
-    FileNode* media = assets->children[0];
     createPreviewNode(m_previewArena, "stills", 52, true, 0, media);
     createPreviewNode(m_previewArena, "video", 49, true, 0, media);
     createPreviewNode(m_previewArena, "audio", 44, true, 0, media);
 
-    FileNode* icons = assets->children[1];
     createPreviewNode(m_previewArena, "toolbar", 36, true, 0, icons);
     createPreviewNode(m_previewArena, "status", 29, true, 0, icons);
     createPreviewNode(m_previewArena, "close.svg", 25, false, qRgb(216, 144, 62), icons);
 
-    FileNode* textures = assets->children[2];
     createPreviewNode(m_previewArena, "paper.png", 26, false, qRgb(226, 144, 104), textures);
     createPreviewNode(m_previewArena, "noise.png", 22, false, qRgb(206, 122, 90), textures);
-    createPreviewNode(m_previewArena, "gradients", 22, true, 0, textures);
+    FileNode* gradients = createPreviewNode(m_previewArena, "gradients", 22, true, 0, textures);
 
-    FileNode* logs = system->children[0];
     createPreviewNode(m_previewArena, "app", 42, true, 0, logs);
     createPreviewNode(m_previewArena, "worker", 38, true, 0, logs);
     createPreviewNode(m_previewArena, "events.log", 30, false, qRgb(198, 180, 226), logs);
 
-    FileNode* services = system->children[1];
     createPreviewNode(m_previewArena, "daemon", 36, true, 0, services);
     createPreviewNode(m_previewArena, "scheduler", 31, true, 0, services);
     createPreviewNode(m_previewArena, "indexer", 23, true, 0, services);
 
-    FileNode* cacheRoot = system->children[2];
     createPreviewNode(m_previewArena, "snapshots", 24, true, 0, cacheRoot);
     createPreviewNode(m_previewArena, "thumbs", 21, true, 0, cacheRoot);
     createPreviewNode(m_previewArena, "state.json", 20, false, qRgb(164, 136, 208), cacheRoot);
 
-    FileNode* widgets = apps->children[0];
+    FileNode* widgets = apps->firstChild;
     createPreviewNode(m_previewArena, "controls", 24, true, 0, widgets);
     createPreviewNode(m_previewArena, "models", 18, true, 0, widgets);
     createPreviewNode(m_previewArena, "dialog.cpp", 20, false, qRgb(66, 153, 184), widgets);
 
-    FileNode* core = apps->children[1];
+    FileNode* core = widgets->nextSibling;
     createPreviewNode(m_previewArena, "render", 18, true, 0, core);
     createPreviewNode(m_previewArena, "layout", 18, true, 0, core);
     createPreviewNode(m_previewArena, "scene.cpp", 18, false, qRgb(82, 162, 201), core);
 
-    FileNode* tests = apps->children[2];
+    FileNode* tests = core->nextSibling;
     createPreviewNode(m_previewArena, "ui_test", 18, false, qRgb(86, 181, 134), tests);
     createPreviewNode(m_previewArena, "perf_test", 16, false, qRgb(116, 201, 152), tests);
 
-    FileNode* preview = docs->children[0];
+    FileNode* preview = docs->firstChild;
     createPreviewNode(m_previewArena, "shots", 22, true, 0, preview);
     createPreviewNode(m_previewArena, "mock.json", 18, false, qRgb(92, 173, 136), preview);
     createPreviewNode(m_previewArena, "theme.ini", 12, false, qRgb(118, 189, 154), preview);
 
-    FileNode* theme = shared->children[0];
+    FileNode* theme = shared->firstChild;
     createPreviewNode(m_previewArena, "light.json", 15, false, qRgb(132, 198, 164), theme);
     createPreviewNode(m_previewArena, "dark.json", 13, false, qRgb(154, 210, 180), theme);
-    createPreviewNode(m_previewArena, "tokens", 10, true, 0, theme);
+    FileNode* tokens = createPreviewNode(m_previewArena, "tokens", 10, true, 0, theme);
 
-    FileNode* platform = shared->children[1];
+    FileNode* platform = theme->nextSibling;
     createPreviewNode(m_previewArena, "linux", 14, true, 0, platform);
     createPreviewNode(m_previewArena, "mac", 11, true, 0, platform);
     createPreviewNode(m_previewArena, "win", 8, true, 0, platform);
 
-    FileNode* stills = media->children[0];
+    FileNode* stills = media->firstChild;
     createPreviewNode(m_previewArena, "home.png", 19, false, qRgb(122, 198, 160), stills);
     createPreviewNode(m_previewArena, "detail.png", 17, false, qRgb(144, 210, 174), stills);
     createPreviewNode(m_previewArena, "focus.png", 16, false, qRgb(164, 224, 188), stills);
 
-    FileNode* video = media->children[1];
+    FileNode* video = stills->nextSibling;
     createPreviewNode(m_previewArena, "demo.mp4", 27, false, qRgb(230, 166, 72), video);
     createPreviewNode(m_previewArena, "walkthrough.mov", 22, false, qRgb(242, 186, 96), video);
 
-    FileNode* audio = media->children[2];
+    FileNode* audio = video->nextSibling;
     createPreviewNode(m_previewArena, "theme.ogg", 23, false, qRgb(192, 110, 110), audio);
     createPreviewNode(m_previewArena, "fx.wav", 21, false, qRgb(208, 126, 126), audio);
 
-    FileNode* toolbar = icons->children[0];
+    FileNode* toolbar = icons->firstChild;
     createPreviewNode(m_previewArena, "open.svg", 13, false, qRgb(238, 182, 86), toolbar);
     createPreviewNode(m_previewArena, "save.svg", 12, false, qRgb(244, 194, 106), toolbar);
     createPreviewNode(m_previewArena, "refresh.svg", 11, false, qRgb(248, 204, 122), toolbar);
 
-    FileNode* status = icons->children[1];
+    FileNode* status = toolbar->nextSibling;
     createPreviewNode(m_previewArena, "ok.svg", 11, false, qRgb(216, 144, 62), status);
     createPreviewNode(m_previewArena, "warn.svg", 10, false, qRgb(228, 160, 76), status);
     createPreviewNode(m_previewArena, "error.svg", 8, false, qRgb(236, 176, 92), status);
 
-    FileNode* gradients = textures->children[2];
     createPreviewNode(m_previewArena, "warm.png", 12, false, qRgb(210, 130, 92), gradients);
     createPreviewNode(m_previewArena, "cool.png", 10, false, qRgb(230, 150, 112), gradients);
 
-    FileNode* appLogs = logs->children[0];
+    FileNode* appLogs = logs->firstChild;
     createPreviewNode(m_previewArena, "today.log", 16, false, qRgb(154, 138, 198), appLogs);
     createPreviewNode(m_previewArena, "yesterday.log", 14, false, qRgb(176, 157, 214), appLogs);
-    createPreviewNode(m_previewArena, "archive", 12, true, 0, appLogs);
+    FileNode* archive = createPreviewNode(m_previewArena, "archive", 12, true, 0, appLogs);
 
-    FileNode* workerLogs = logs->children[1];
+    FileNode* workerLogs = appLogs->nextSibling;
     createPreviewNode(m_previewArena, "queue.log", 15, false, qRgb(166, 148, 206), workerLogs);
     createPreviewNode(m_previewArena, "jobs.log", 13, false, qRgb(188, 170, 220), workerLogs);
 
-    FileNode* daemon = services->children[0];
-    createPreviewNode(m_previewArena, "state", 13, true, 0, daemon);
+    FileNode* daemon = services->firstChild;
+    FileNode* daemonState = createPreviewNode(m_previewArena, "state", 13, true, 0, daemon);
     createPreviewNode(m_previewArena, "daemon.cpp", 11, false, qRgb(146, 128, 192), daemon);
 
-    FileNode* scheduler = services->children[1];
-    createPreviewNode(m_previewArena, "plans", 12, true, 0, scheduler);
+    FileNode* scheduler = daemon->nextSibling;
+    FileNode* schedulerPlans = createPreviewNode(m_previewArena, "plans", 12, true, 0, scheduler);
     createPreviewNode(m_previewArena, "scheduler.cpp", 10, false, qRgb(170, 150, 210), scheduler);
 
-    FileNode* indexer = services->children[2];
-    createPreviewNode(m_previewArena, "jobs", 11, true, 0, indexer);
+    FileNode* indexer = scheduler->nextSibling;
+    FileNode* indexerJobs = createPreviewNode(m_previewArena, "jobs", 11, true, 0, indexer);
     createPreviewNode(m_previewArena, "indexer.cpp", 8, false, qRgb(186, 168, 220), indexer);
 
-    FileNode* snapshots = cacheRoot->children[0];
+    FileNode* snapshots = cacheRoot->firstChild;
     createPreviewNode(m_previewArena, "frame-01", 10, false, qRgb(162, 135, 208), snapshots);
     createPreviewNode(m_previewArena, "frame-02", 8, false, qRgb(176, 151, 220), snapshots);
     createPreviewNode(m_previewArena, "frame-03", 6, false, qRgb(188, 165, 226), snapshots);
 
-    FileNode* thumbs = cacheRoot->children[1];
+    FileNode* thumbs = snapshots->nextSibling;
     createPreviewNode(m_previewArena, "thumb-a.png", 9, false, qRgb(188, 165, 226), thumbs);
     createPreviewNode(m_previewArena, "thumb-b.png", 7, false, qRgb(198, 176, 232), thumbs);
 
-    FileNode* controls = widgets->children[0];
+    FileNode* controls = widgets->firstChild;
     createPreviewNode(m_previewArena, "slider.cpp", 9, false, qRgb(103, 177, 210), controls);
     createPreviewNode(m_previewArena, "toggle.cpp", 8, false, qRgb(126, 190, 219), controls);
     createPreviewNode(m_previewArena, "knob.h", 7, false, qRgb(144, 202, 227), controls);
     createPreviewNode(m_previewArena, "hit_test.h", 3, false, qRgb(162, 214, 236), controls);
     createPreviewNode(m_previewArena, "focus_ring.h", 2, false, qRgb(178, 224, 242), controls);
 
-    FileNode* models = widgets->children[1];
+    FileNode* models = controls->nextSibling;
     createPreviewNode(m_previewArena, "pane_model.h", 10, false, qRgb(92, 162, 196), models);
     createPreviewNode(m_previewArena, "tree_model.h", 8, false, qRgb(112, 176, 208), models);
 
-    FileNode* render = core->children[0];
+    FileNode* render = core->firstChild;
     createPreviewNode(m_previewArena, "tiles.cpp", 8, false, qRgb(94, 168, 204), render);
     createPreviewNode(m_previewArena, "labels.cpp", 6, false, qRgb(118, 184, 216), render);
 
-    FileNode* layout = core->children[1];
+    FileNode* layout = render->nextSibling;
     createPreviewNode(m_previewArena, "split.cpp", 9, false, qRgb(104, 178, 214), layout);
     createPreviewNode(m_previewArena, "squarify.cpp", 7, false, qRgb(128, 194, 224), layout);
 
-    FileNode* shots = preview->children[0];
+    FileNode* shots = preview->firstChild;
     createPreviewNode(m_previewArena, "home.png", 10, false, qRgb(122, 198, 160), shots);
     createPreviewNode(m_previewArena, "detail.png", 7, false, qRgb(144, 210, 174), shots);
     createPreviewNode(m_previewArena, "search.png", 5, false, qRgb(164, 224, 188), shots);
     createPreviewNode(m_previewArena, "tooltip.png", 2, false, qRgb(182, 232, 202), shots);
 
-    FileNode* tokens = theme->children[2];
     createPreviewNode(m_previewArena, "accent.json", 6, false, qRgb(154, 210, 180), tokens);
     createPreviewNode(m_previewArena, "spacing.json", 4, false, qRgb(174, 224, 194), tokens);
     createPreviewNode(m_previewArena, "radius.json", 2, false, qRgb(190, 234, 206), tokens);
 
-    FileNode* linuxPlatform = platform->children[0];
+    FileNode* linuxPlatform = platform->firstChild;
     createPreviewNode(m_previewArena, "paths.cpp", 8, false, qRgb(140, 204, 170), linuxPlatform);
     createPreviewNode(m_previewArena, "fs.cpp", 6, false, qRgb(160, 218, 186), linuxPlatform);
 
-    FileNode* archive = appLogs->children[2];
     createPreviewNode(m_previewArena, "2024.log", 7, false, qRgb(186, 168, 220), archive);
     createPreviewNode(m_previewArena, "2023.log", 5, false, qRgb(202, 184, 230), archive);
     createPreviewNode(m_previewArena, "2022.log", 2, false, qRgb(216, 198, 236), archive);
 
-    FileNode* daemonState = daemon->children[0];
     createPreviewNode(m_previewArena, "pid", 7, false, qRgb(160, 142, 202), daemonState);
     createPreviewNode(m_previewArena, "config", 6, false, qRgb(178, 160, 214), daemonState);
 
-    FileNode* schedulerPlans = scheduler->children[0];
     createPreviewNode(m_previewArena, "daily.json", 7, false, qRgb(178, 160, 214), schedulerPlans);
     createPreviewNode(m_previewArena, "nightly.json", 5, false, qRgb(196, 178, 224), schedulerPlans);
 
-    FileNode* indexerJobs = indexer->children[0];
     createPreviewNode(m_previewArena, "scan.json", 6, false, qRgb(190, 172, 222), indexerJobs);
     createPreviewNode(m_previewArena, "merge.json", 5, false, qRgb(206, 188, 232), indexerJobs);
     createPreviewNode(m_previewArena, "gc.json", 2, false, qRgb(220, 202, 238), indexerJobs);
@@ -1963,16 +1966,16 @@ void SettingsDialog::refreshPreview()
 
     TreemapSettings previewSettings = settings();
     ColorUtils::assignColors(m_previewRoot, previewSettings);
-    for (FileNode* child : m_previewRoot->children) {
-        if (child && child->isVirtual) {
+    for (FileNode* child = m_previewRoot->firstChild; child; child = child->nextSibling) {
+        if (child && child->isVirtual()) {
             child->color = previewSettings.freeSpaceColor.rgba();
             break;
         }
     }
     m_previewWidget->applySettings(previewSettings);
     m_previewWidget->notifyTreeChanged();
-    if (!m_previewRoot->children.empty()) {
-        m_previewWidget->setPreviewHoveredNode(m_previewRoot->children.front());
+    if (m_previewRoot->firstChild) {
+        m_previewWidget->setPreviewHoveredNode(m_previewRoot->firstChild);
     }
 }
 

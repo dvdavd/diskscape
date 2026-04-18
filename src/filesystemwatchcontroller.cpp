@@ -10,7 +10,7 @@
 #include <algorithm>
 
 namespace {
-constexpr qint64 kWatcherRefreshThresholdBytes = 10LL * 1024LL * 1024LL;
+constexpr qint64 kWatcherRefreshThresholdBytes = 1LL * 1024LL * 1024LL;
 constexpr int kMaxWatches = 500;
 }
 
