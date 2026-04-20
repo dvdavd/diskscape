@@ -147,6 +147,26 @@ QRect gradientPresetSwatchRect(const QRect& bounds, Qt::LayoutDirection directio
                             std::max(0, bounds.height() - (kGradientPresetSwatchMargin * 2)));
     return QStyle::visualRect(direction, bounds, logicalRect);
 }
+
+FileNode* findDirectChildByName(FileNode* parent, const QString& name)
+{
+    if (!parent) {
+        return nullptr;
+    }
+    for (FileNode* child = parent->firstChild; child; child = child->nextSibling) {
+        if (!child->isVirtual() && child->name == name) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+QString previewSampleThumbnailPath(FileNode* previewRoot)
+{
+    FileNode* const assets = findDirectChildByName(previewRoot, QStringLiteral("assets"));
+    FileNode* const sample = findDirectChildByName(assets, QStringLiteral("sample.jpg"));
+    return sample ? sample->computePath() : QString();
+}
 }
 
 class GradientPresetComboBox : public QComboBox {
@@ -615,10 +635,9 @@ SettingsDialog::SettingsDialog(const TreemapSettings& currentSettings, QWidget* 
     // Pre-seed the sample thumbnail so it shows immediately when thumbnails
     // are enabled in the preview, without needing a real file on disk.
     {
-        const QString samplePath = QDir::cleanPath(
-            QDir(QDir::rootPath()).filePath(QStringLiteral("assets/sample.jpg")));
+        const QString samplePath = previewSampleThumbnailPath(m_previewRoot);
         QPixmap samplePixmap(QStringLiteral(":/assets/sample.jpg"));
-        if (!samplePixmap.isNull()) {
+        if (!samplePath.isEmpty() && !samplePixmap.isNull()) {
             const qsizetype bytes = (qsizetype)samplePixmap.width() * samplePixmap.height()
                                     * samplePixmap.depth() / 8;
             m_previewWidget->m_thumbnailStore.insert(samplePath, samplePixmap);

@@ -337,6 +337,14 @@ diskvu_add_test(test_searchfilterpanel
     ${DISKVU_WIDGET_SRC}
 )
 
+diskvu_add_test(test_settingsdialog
+    tests/test_settingsdialog.cpp
+    src/settingsdialog.h
+    src/settingsdialog.cpp
+    resources.qrc
+    ${DISKVU_WIDGET_SRC}
+)
+
 diskvu_add_test(test_filesystemutils
     tests/test_filesystemutils.cpp
     ${DISKVU_FILESYSTEMUTILS_SRC}

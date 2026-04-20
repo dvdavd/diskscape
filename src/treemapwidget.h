@@ -147,6 +147,7 @@ public:
     bool hasOpenImagePreview() const { return !m_imagePreviewPath.isEmpty() || m_imagePreviewProgress > 0.0; }
     void closeImagePreviewFromNavigation();
     void applyLoadedImagePreview(const QString& path, const QImage& image);
+    bool hasCachedThumbnailForPath(const QString& path) const { return m_thumbnailStore.contains(path); }
     bool nodeSupportsImagePreview(const FileNode* node) const;
     void requestImagePreview(FileNode* node, const QRectF& sourceRect);
 
