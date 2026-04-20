@@ -2830,6 +2830,19 @@ void TreemapWidget::triggerPressHoldContextMenu()
         viewport()->mapToGlobal(m_pressHoldCurrentPos.toPoint()));
     m_contextMenuActive = false;
     clearHoverState(false);
+    // Reset any gesture state that may have been active when the menu opened
+    // (e.g. native gesture or touch sequence on macOS), otherwise the next
+    // pan/click will be swallowed by stuck m_nativeGestureActive / m_touchGestureActive.
+    m_nativeGestureActive = false;
+    m_nativeGesturePinching = false;
+    m_nativeGesturePendingBackOnEnd = false;
+    m_touchGestureActive = false;
+    m_touchPanning = false;
+    m_touchPinching = false;
+    if (m_middlePanning) {
+        m_middlePanning = false;
+        unsetCursor();
+    }
 
     if (m_pressHoldFromTouch) {
         m_touchTapEligible = false;
@@ -6440,6 +6453,10 @@ void TreemapWidget::contextMenuEvent(QContextMenuEvent* event)
         m_touchGestureActive = false;
         m_touchPanning = false;
         m_touchPinching = false;
+        if (m_middlePanning) {
+            m_middlePanning = false;
+            unsetCursor();
+        }
         // If the mouse left while the menu was open, clear hover now
         if (!underMouse() && m_hovered) {
             leaveEvent(nullptr);
