@@ -55,6 +55,24 @@ inline void rebuildScanResultSnapshot(ScanResult& result)
 
 class Scanner {
 public:
+    struct DirTask {
+        FileNode* placeholder = nullptr;
+        QString childPath;
+        float branchHue = 0.0f;
+        unsigned long long rootDev = 0;
+        int depth = 0;
+        bool inMarkedBranch = false;
+    };
+
+    struct PartitionTask {
+        FileNode* parent = nullptr;
+        QString path;
+        float branchHue = 0.0f;
+        unsigned long long rootDev = 0;
+        int depth = 0;
+        bool inMarkedBranch = false;
+    };
+
     using ProgressCallback = std::function<void(ScanResult)>;
     using ProgressReadyCallback = std::function<bool()>;
     using ActivityCallback = std::function<void(const QString&, qint64)>;
@@ -68,6 +86,23 @@ public:
                            std::shared_ptr<const std::atomic_bool> cancelFlag = nullptr);
 
 private:
+    static unsigned long long initialRootDevice(const QString& path);
+
+    static void partitionNode(PartitionTask partition,
+                              const TreemapSettings& settings,
+                              const std::vector<QString>& allExcludedPaths,
+                              const ErrorCallback& errorCallback,
+                              const std::shared_ptr<const std::atomic_bool>& cancelFlag,
+                              std::vector<PartitionTask>& partitionQueue,
+                              std::vector<DirTask>& dirTasks,
+                              NodeArena& arena,
+                              const ActivityCallback& activityCallback,
+                              const std::shared_ptr<std::atomic<qint64>>& liveBytesSeen,
+                              ScanThrottler& throttler,
+                              int targetTaskCount,
+                              int effectiveParallelPartitionDepth,
+                              const std::shared_ptr<HardLinkTracker>& hardLinkTracker);
+
     static qint64 scanNode(FileNode* node, const QString& path, const ScanResult& scanState,
                            const TreemapSettings& settings,
                            const std::vector<QString>& allExcludedPaths,

@@ -19,7 +19,74 @@
 #include <QStorageInfo>
 #include <algorithm>
 #include <atomic>
+#include <mutex>
+#include <unordered_set>
 #include <vector>
+
+struct HardLinkKey {
+    unsigned long long dev;
+    unsigned long long ino;
+
+    bool operator==(const HardLinkKey& other) const
+    {
+        return dev == other.dev && ino == other.ino;
+    }
+};
+
+namespace std {
+template<> struct hash<HardLinkKey> {
+    size_t operator()(const HardLinkKey& key) const
+    {
+        return hash<unsigned long long>{}(key.dev) ^ (hash<unsigned long long>{}(key.ino) << 1);
+    }
+};
+}
+
+struct HardLinkTracker {
+    static constexpr int kShards = 64;
+
+    struct Shard {
+        std::mutex mutex;
+        std::unordered_set<HardLinkKey> seen;
+    };
+    Shard shards[kShards];
+
+    Shard& shardFor(unsigned long long ino)
+    {
+        return shards[ino % kShards];
+    }
+};
+
+namespace {
+
+bool shouldCountHardLink(const std::shared_ptr<HardLinkTracker>& tracker,
+                         unsigned long long dev, unsigned long long ino)
+{
+    if (!tracker) {
+        return true;
+    }
+
+    auto& shard = tracker->shardFor(ino);
+    std::lock_guard<std::mutex> lock(shard.mutex);
+    return shard.seen.insert({dev, ino}).second;
+}
+
+QString spaceSharingDeviceId(const QStorageInfo& vol)
+{
+    const QString device = vol.device();
+#ifdef Q_OS_MACOS
+    if (vol.fileSystemType() == "apfs" && device.startsWith(QLatin1String("/dev/disk"))) {
+        // Normalize /dev/disk3s1 to /dev/disk3 to represent the container
+        const int sIndex = device.indexOf(QLatin1Char('s'), 9); // After /dev/disk
+        if (sIndex != -1) {
+            return device.left(sIndex);
+        }
+    }
+#endif
+    return device;
+}
+
+} // namespace
 
 struct ScanThrottler {
     QSemaphore networkSemaphore{2};
@@ -58,6 +125,8 @@ struct ThrottleGuard {
     }
 };
 
+namespace {
+
 static constexpr int kMaxDepth = 64;
 static constexpr qint64 kProgressIntervalMs = 180;
 static constexpr qint64 kActivityIntervalMs = 40;
@@ -69,8 +138,6 @@ static constexpr size_t kPreviewChildLimits[] = {
     160,
     384,
 };
-
-namespace {
 
 QStringList defaultExcludedPathsForScanRoot(const QString& scanRootPath)
 {

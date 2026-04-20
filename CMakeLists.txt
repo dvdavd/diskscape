@@ -42,6 +42,7 @@ qt_add_executable(diskvu
     src/filesystemutils.h
     src/filesystemutils.cpp
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     src/thumbnailprovider.h
     ${THUMBNAIL_SRC}
@@ -158,6 +159,7 @@ qt_add_executable(scanner_bench EXCLUDE_FROM_ALL
     src/filesystemutils.h
     src/filesystemutils.cpp
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     src/colorutils.h
     src/colorutils.cpp
@@ -300,6 +302,7 @@ diskvu_add_test(test_scanner
     tests/test_scanner.cpp
     ${DISKVU_FILESYSTEMUTILS_SRC}
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     ${DISKVU_SETTINGS_SRC}
     ${DISKVU_COLORUTILS_SRC}
@@ -313,6 +316,7 @@ diskvu_add_test(test_search
 diskvu_add_test(test_refresh
     tests/test_refresh.cpp
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     ${DISKVU_WIDGET_SRC}
 )
@@ -343,6 +347,7 @@ diskvu_add_test(test_filesystemwatchcontroller
     src/filesystemwatchcontroller.h
     src/filesystemwatchcontroller.cpp
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     ${DISKVU_WIDGET_SRC}
 )
@@ -350,6 +355,7 @@ diskvu_add_test(test_filesystemwatchcontroller
 diskvu_add_test(test_subtree_refresh_paths
     tests/test_subtree_refresh_paths.cpp
     src/scanner.h
+    src/scanner.cpp
     ${SCANNER_BACKEND_SRC}
     ${DISKVU_WIDGET_SRC}
 )
